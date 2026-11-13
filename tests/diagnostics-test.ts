@@ -31,3 +31,16 @@ assert.match(capped.message,/另有 5 条错误/);
 assert.equal(modelErrorText(JSON.stringify([{message:'unsupported comparison',locs:[{x:1}]}])),'unsupported comparison');
 check('answer tree! { Answer [p ["正常"]]};');
 console.log('DARI-style diagnostics: sibling syntax recovery, independent errors, upstream suppression, text/suggestions and bounded receipts passed');
+
+// Unknown attribute names are diagnosed before interpreting their values/specs.
+let hostCalls=0;
+const host:any={contractId:'attribute-locations',components:['StackedBarChart'],functions:{},reportStyle:'',checkFigure(){hostCalls++;throw Error('spec is incomplete');},renderFigure(){throw Error('unused');}};
+const chartSource='data sev_long=table([{n:1}]);answer tree! {Answer [\nStackedBarChart(data = sev_long, spec1 = {missing_field: absent})\n]};';
+const chart=(()=>{try{check(chartSource,undefined,{host});assert.fail('Expected unknown attribute');}catch(error){assert(error instanceof DiagnosticFailure);return error;}})();
+assert.equal(chart.diagnostics.length,1);assert.equal(chart.diagnostics[0].at,chartSource.indexOf('spec1'));
+assert.match(chart.message,/Unknown figure attribute spec1/);assert.equal(hostCalls,0);
+const attributes='answer tree! {Answer [p(title1="A",lang1="zh"),UseValue(ref1=missing)]};';
+const unknown=failure(attributes);assert.equal(unknown.diagnostics.length,3);
+for(const name of ['title1','lang1','ref1'])assert.equal(unknown.diagnostics.find(d=>d.message.includes(name))!.at,attributes.indexOf(name));
+assert(!unknown.message.includes('Missing attribute'));assert(!unknown.message.includes('Unknown binding missing'));
+const invalidData='answer tree! {Answer [Table(data = 42)]};';assert.equal(failure(invalidData).diagnostics[0].at,invalidData.indexOf('42'));

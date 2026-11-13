@@ -93,3 +93,11 @@ for(const [word,pattern]of [['TimeUnit',/enum TimeUnit.*Day, Week/],['Context',/
  const source='data value='+word+';answer tree! {Answer []};';timeServer.handle('textDocument/didOpen',{textDocument:{uri,text:source,version:2}});const hover=timeServer.handle('textDocument/hover',{textDocument:{uri},position:positionAt(source,source.indexOf(word))}) as any;
  if(pattern)assert.match(hover.contents.value,pattern);else assert.equal(hover,null);
 }
+
+const attributeMessages:any[]=[];
+const attributeServer=new LanguageServer({options:{host:{contractId:'attribute-hover',components:['StackedBarChart'],functions:{},reportStyle:'',checkFigure(){throw Error('must not reach host');},renderFigure(){throw Error('unused');}}}},(_,p)=>attributeMessages.push(p));
+const wrongAttribute='data sev_long=table([{n:1}]);answer tree! {Answer [\n StackedBarChart(data=sev_long, spec1={value:$.n})\n]};';
+attributeServer.handle('textDocument/didOpen',{textDocument:{uri,text:wrongAttribute,version:1}});
+const located=attributeMessages.at(-1).diagnostics;assert.equal(located.length,1);
+assert.deepEqual(located[0].range.start,positionAt(wrongAttribute,wrongAttribute.indexOf('spec1')));
+assert.deepEqual(located[0].range.end,positionAt(wrongAttribute,wrongAttribute.indexOf('spec1')+5));

@@ -599,10 +599,10 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
   const attrs:Record<string,Node>=Object.create(null);for(const a of n.attrs){if(Object.hasOwn(attrs,a.name))err(a,'Duplicate attribute '+a.name);attrs[a.name]=a.value;}
   if(p.host?.components.includes(n.name)){
    if(n.children.length)err(n,'Figure component cannot have children');
-   const binding=(key:string)=>{const ref=attrs[key];if(ref?.k!=='ref'||ref.path.length!==1)err(n,key+' requires a Table declaration reference');const b=p.bindings.get(ref.path[0]);if(!b&&failed.has(ref.path[0]))throw new UpstreamTypeUnavailable();if(b?.type.kind!=='table'||b.type.inner?.kind!=='schema')err(n,key+' requires Table(Schema)');attributeType(key,b!.type);return b!;};
+   const binding=(key:string)=>{const ref=attrs[key];if(ref?.k!=='ref'||ref.path.length!==1)err(ref??n,key+' requires a Table declaration reference');const b=p.bindings.get(ref.path[0]);if(!b&&failed.has(ref.path[0]))throw new UpstreamTypeUnavailable();if(b?.type.kind!=='table'||b.type.inner?.kind!=='schema')err(ref,key+' requires Table(Schema)');attributeType(key,b!.type);return b!;};
    const checkpoint=diagnostics.checkpoint();
    const allowed=['data','nodes','spec',...(attrs.spec?[]:['x','value','series','title','style','layout','allow_no_data','value_min','unit','x_label','value_label','formats','x_axis'])];
-   for(const key of Object.keys(attrs))if(!allowed.includes(key))finding(new Fault('Unknown figure attribute '+key+' on '+n.name+'; chart configuration belongs in spec = {...}',attrs[key].at));
+   settle(n.attrs,(attribute:Node)=>{if(!allowed.includes(attribute.name))err(attribute,'Unknown figure attribute '+attribute.name+' on '+n.name+'; chart configuration belongs in spec = {...}');});
    const data=binding('data'),nodes=attrs.nodes?binding('nodes'):undefined,fields={...data.type.inner!.fields!};
    for(const b of [data,...(nodes?[nodes]:[])])if(b.result?.maxRows===undefined||b.result.maxRows>MAX_PRESENTATION_ROWS)finding(new Fault('Figure input '+(b===data?'data':'nodes')+' requires a proven bound <= '+MAX_PRESENTATION_ROWS,n.at,{code:'presentation-bound',reason:'每个图表输入独立受展现行数上限约束，取数上界不等于展现上界',suggestion:'先按业务聚合，或 order_by(...) |> take(110) 后再交给组件；不自动截断'}));
    const spec=attrs.spec?figureSpec(attrs.spec,fields,n,env):figureSpec({k:'object',at:n.at,fields:Object.entries(attrs).filter(([key])=>!['data','nodes'].includes(key)).map(([name,value])=>({k:'field',name,value,at:value.at}))},fields,n,env);
@@ -612,6 +612,8 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
   }
   const signature=Object.fromEntries(Object.entries(builtinComponents).map(([name,c])=>[name,Object.keys(c.attributes)]));
   const optionalAttrs=Object.keys(commonAttributes);
+  if(!Object.hasOwn(signature,n.name))err(n,'Unknown component '+n.name);
+  settle(n.attrs,(attribute:Node)=>{if(!signature[n.name].includes(attribute.name)&&!optionalAttrs.includes(attribute.name))err(attribute,'Unknown attribute '+attribute.name+' on '+n.name);});
   for(const key of optionalAttrs)if(attrs[key]){if(attrs[key].k!=='literal'||typeof attrs[key].value!=='string')err(attrs[key],key+' requires static text');}
   if(n.name==='a'){if(attrs.href?.k!=='literal'||typeof attrs.href.value!=='string'||! /^(https?:|mailto:|#|\/)/.test(attrs.href.value))err(n,'Link href requires a static http, mailto, fragment or absolute path');}
   if(n.name==='Lit'&&(attrs.value?.k!=='literal'||typeof attrs.value.value!=='string'))err(n,'Lit requires value = "static text"',{code:'literal-text',reason:'Lit 使用具名属性 value 接收静态字符串，表示作者确认这是固定文案',suggestion:'固定文案写 Lit(value = "最近 3 天")；查询结果用 UseValue(ref = ...) 引用；普通文字也可以直接写 "文字"'});
@@ -624,10 +626,10 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
     if(attrs.format)n.checkedTimeFormat=timeFormat(attrs.format,t,env).checked;
    }
   }
-  if(!Object.hasOwn(signature,n.name))err(n,'Unknown component '+n.name);for(const a of Object.keys(attrs))if(!signature[n.name].includes(a)&&!optionalAttrs.includes(a))err(n,'Unknown attribute '+a+' on '+n.name);for(const a of signature[n.name])if(builtinComponents[n.name].attributes[a].required&&!attrs[a])err(n,'Missing attribute '+a+' on '+n.name);
-  const lookup=(a:string)=>{const v=attrs[a];if(v?.k!=='ref'||v.path.length!==1)err(n,a+' requires a declaration reference');const b=p.bindings.get(v.path[0]);if(!b&&failed.has(v.path[0]))throw new UpstreamTypeUnavailable();if(!b)err(v,'Unknown declaration '+v.path[0]);attributeType(a,b!.type);return b!;};
+  for(const a of signature[n.name])if(builtinComponents[n.name].attributes[a].required&&!attrs[a])err(n,'Missing attribute '+a+' on '+n.name);
+  const lookup=(a:string)=>{const v=attrs[a];if(v?.k!=='ref'||v.path.length!==1)err(v??n,a+' requires a declaration reference');const b=p.bindings.get(v.path[0]);if(!b&&failed.has(v.path[0]))throw new UpstreamTypeUnavailable();if(!b)err(v,'Unknown declaration '+v.path[0]);attributeType(a,b!.type);return b!;};
   if(['Table','ColumnChart'].includes(n.name)){const b=lookup('data');if(b.result?.maxRows===undefined||b.result.maxRows>MAX_PRESENTATION_ROWS)err(n,'Presentation requires a proven bound <= '+MAX_PRESENTATION_ROWS,{code:'presentation-bound',reason:'表格输入必须证明不超过展现上限；最多取数 500 行不代表可全部展现',suggestion:'先聚合或按业务 order_by(...) |> take(110)，不自动截断'});}
-  if(['Table','ColumnChart'].includes(n.name)){const b=lookup('data');if(b.type.kind!=='table'||b.type.inner!.kind!=='schema')err(n,'Expected Schema rows');for(const a of n.name==='ColumnChart'?['x','value']:[]){if(attrs[a].k!=='projection')err(attrs[a],'Use $.field to select a row field');const t=checkedProjection(attrs[a],b.type.inner!);let numeric=present(t);while(numeric.kind==='nominal')numeric=numeric.inner!;if(a==='value'&&!['Int','Float'].includes(numeric.name??''))err(attrs[a],'Chart value must be numeric or a newtype with numeric representation');}}
+  if(['Table','ColumnChart'].includes(n.name)){const b=lookup('data');if(b.type.kind!=='table'||b.type.inner!.kind!=='schema')err(attrs.data,'Expected Schema rows');for(const a of n.name==='ColumnChart'?['x','value']:[]){if(attrs[a].k!=='projection')err(attrs[a],'Use $.field to select a row field');const t=checkedProjection(attrs[a],b.type.inner!);let numeric=present(t);while(numeric.kind==='nominal')numeric=numeric.inner!;if(a==='value'&&!['Int','Float'].includes(numeric.name??''))err(attrs[a],'Chart value must be numeric or a newtype with numeric representation');}}
   if(n.name==='Table'){
    const fields=lookup('data').type.inner!.fields!,spec=attrs.spec?figureSpec(attrs.spec,fields,n,env):{};
    for(const key of Object.keys(spec))if(!['columns','labels','title','precision','allow_no_data','formats'].includes(key))err(n,'Unknown Table option '+key);
