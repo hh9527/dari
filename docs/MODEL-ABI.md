@@ -14,9 +14,13 @@ ModelCheckPort.check_type 返回 CheckedIntent：element、container、maxRows�
 
 ## 身份与执行
 
-检查端和执行端都发布 contractId 与 implementationId。前者标识公开语义契约，后者标识具体执行实现；模型规则或代码变化必须更新相应身份。执行端 bind 消费 opaque plan 和参数值，返回参数化 SQL、绑定值、列类型和上界；运行期再次核对列契约、实际行数及身份，不重新调用检查端。
+检查端和执行端都发布 contractId 与 implementationId。前者标识公开语义契约，后者标识具体执行实现；模型规则或代码变化必须更新相应身份。执行端 execute 消费 opaque plan 和参数值，在适配器指定的后端执行并返回行数据、列类型和上界；运行期再次核对列契约、实际行数及身份，不重新调用检查端。
 
-Type 与 ValueCodec 分别保留业务名义类型、可用计算、parse/encode/decode、语义身份及 presentation。Percent、Ratio、EpochMillis、DateTimeUtc、DateTimeTz 和 TimeZone 是共同语义，不与业务命名空间绑定。映射到 SQLite 或其他后端的具体 wire 类型属于模型适配器；当前本地执行仅实现 SQLite 方言。
+Type 与 ValueCodec 分别保留业务名义类型、可用计算、parse/encode/decode、语义身份及 presentation。Percent、Ratio、EpochMillis、DateTimeUtc、DateTimeTz 和 TimeZone 是共同语义，不与业务命名空间绑定。映射到 SQLite 或其他后端的具体 wire 类型属于模型适配器；本地后处理固定使用独立 SQLite 工作库，远端可以使用其他方言或非 SQL 后端。核心不接收远端 SQL。
+
+远端 rows 使用发布列类型的 wire 编码，适配器先规范化驱动返回值；核心检查精确字段集合、类型/可空性、结果上界并按 codec 解码。直接展示使用解码结果；query! 引用远端节点时再按 codec 编码导入本地临时表。一次执行共享取数缓存和物化缓存；临时表按已检查 Schema 建立，空结果亦保留结构。远端的排序在本地通过隐藏序号保持，展示不暴露内部列。
+
+每个实际执行的远端阶段都必须证明上界不超过 500，本地下游 take 不能补救无界远端；图表、表格的输入上界为 110。执行时同时核对远端元数据、实际行数与展示限制。
 
 ## 验收
 

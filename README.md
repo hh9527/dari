@@ -9,7 +9,7 @@
 | `@hh9527/dari-core` | 解析、名称绑定、类型检查、SQL DAG、执行、共享语义及模型/数据库/展现端口 |
 | `@hh9527/dari` | CLI、JSONL 服务、LSP、可信集成模块加载及 SQLite 适配器 |
 
-核心不依赖 DSH、Telora、业务模型或具体数据库驱动。当前本地 SQL 采用 SQLite 方言，由集成方提供连接；这不代表已经实现 PostgreSQL 本地执行。
+核心不依赖 DSH、Telora、业务模型或具体数据库驱动。本地后处理固定使用 SQLite；远端执行由集成适配器负责，数据库和方言独立。远端结果仅在被本地 query! 消费时导入工作库，直接展示不导入。
 
 ## 开发与使用
 
@@ -20,10 +20,10 @@ npm ci
 npm run build
 npm test
 node packages/dari/bin/dari.mjs check examples/local.dari
-node packages/dari/bin/dari.mjs run examples/local.dari --database /path/to/existing.sqlite
+node packages/dari/bin/dari.mjs run examples/local.dari
 ```
 
-`check` 不读取业务行。`run` 只读打开已有数据库，图表或报告产物通过 `--output directory` 输出。两者均可配置 `--integration module.mjs --options '{...}'`。模型取数示例见 `examples/device.dari`，可使用独立夹具 `examples/demo-integration.mjs`，它查询 `devices(id,name,cpu,tenant)` 表；这些示例不依赖生产模型。
+`check` 不读取业务行。`run` 创建独立内存 SQLite 工作库，`--database` 将业务数据库路径交给可信 integration，由适配器只读打开，图表或报告产物通过 `--output directory` 输出。两者均可配置 `--integration module.mjs --options '{...}'`。模型取数示例见 `examples/device.dari`，可使用独立夹具 `examples/demo-integration.mjs`，它查询 `devices(id,name,cpu,tenant)` 表；这些示例不依赖生产模型。
 
 ```sh
 node packages/dari/bin/dari.mjs check examples/device.dari --integration examples/demo-integration.mjs

@@ -16,7 +16,7 @@ try{
  const global=`data n=2;data r=table([{n:1},{n:2},{n:3}]);data result=query! {let r=from(r);let n=n+1;r |> filter(r.n<n) |> project({n:r.n}).as!(r) |> order_by(asc(r.n)) |> take(3)};answer tree! {Answer [Table(data =result)]};`;
  assert.deepEqual(resolve(check(global),sqlite(db)).values.result,[{n:1},{n:2}]);
  assert.throws(()=>local(`let r=r |> project({n:r.n}).as!(out);r`),/Unknown relation binding/);
- const {model}=createFixtureModel();
+ const {model}=createFixtureModel(sqlite(db));
  db.exec("CREATE TABLE devices(id TEXT,name TEXT,tenant TEXT,cpu REAL);INSERT INTO devices VALUES('a','Alpha','t',10),('b','Beta','t',20)");
  const remote=(body:string)=>check(`data result=query_remote! {${body}};answer tree! {Answer [Table(data =result)]};`,model);
  const plain=remote(`let r=from(demo::DeviceKpi);let r=r |> filter(r.name!="Alpha");let r=r |> project({name:r.name,cpu:r.cpu_usage}).as!(out);r |> order_by(desc(r.cpu)) |> take(2)`);

@@ -8,7 +8,7 @@ export async function loadIntegration(path?:string,options:Record<string,unknown
  const integration=await module.createIntegration(options);
  if(!integration||typeof integration!=='object')throw Error('createIntegration must return an Integration');
  if(integration.checker&&(!integration.checker.contractId||!integration.checker.implementationId||typeof integration.checker.check_type!=='function'))throw Error('Invalid ModelCheckPort');
- if(integration.executor&&(!integration.executor.contractId||!integration.executor.implementationId||typeof integration.executor.bind!=='function'))throw Error('Invalid ModelExecutionPort');
+ if(integration.executor&&(!integration.executor.contractId||!integration.executor.implementationId||typeof integration.executor.execute!=='function'))throw Error('Invalid ModelExecutionPort');
  return integration;
 }
 export function argumentsOf(args:string[]){

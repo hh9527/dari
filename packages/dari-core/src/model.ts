@@ -1,3 +1,4 @@
+import type {SqlRow} from './database.ts';
 import type {Type} from './compiler.ts';
 import {canonicalIntent,type InputOrigin,type SourceEvidence} from './source.ts';
 import type {ModelLocation} from './syntax.ts';
@@ -42,8 +43,6 @@ export type ProofReceipt={contractId:string;inputDigest:string;consumedStepIds:s
 export type ModelShape = {element:Type;container:'table'|'option';maxRows?:number};
 export type CheckedIntent = ModelShape & {plan:unknown;receipt:ProofReceipt};
 export type ResultColumn = {name:string;type:string;nullable:boolean};
-// SQL execution transport. A model adapter may lower its checked plan into this contract.
-export type PreparedQuery = {sql:string;bindings:any[];columns:ResultColumn[];max_rows?:number};
 export type ModelCheckPort = {
     contractId:string;
     implementationId:string;
@@ -52,11 +51,13 @@ export type ModelCheckPort = {
     relations?:Record<string,RelationSymbol>;
     check_type(intent:IntentType,encoded:EncodedIntent):CheckedIntent;
 };
-/** Runtime linkage binds values to the already checked plan; it does not re-plan the query. */
+/** Backend rows use the published column encoding; execution never re-plans the query. */
+export type RemoteResult={rows:SqlRow[];columns:ResultColumn[];max_rows?:number};
+/** The adapter owns lowering, backend connections and execution. */
 export type ModelExecutionPort={
     contractId:string;
     implementationId:string;
-    bind(plan:unknown,parameters:unknown[]):PreparedQuery;
+    execute(plan:unknown,parameters:unknown[]):RemoteResult;
 };
 export type ModelPort=ModelCheckPort & ModelExecutionPort;
 export function storage(t:Type):{type:string;nullable:boolean}{

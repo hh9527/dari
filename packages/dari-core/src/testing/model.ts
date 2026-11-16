@@ -1,10 +1,11 @@
+import type {DatabasePort} from '../database.ts';
 import {same,present,optional,type Type} from '../compiler.ts';
 import {proofTarget,type EncodedIntent} from '../model.ts';
 import {MAX_RESULT_ROWS} from '../plan.ts';
 import {storage,type DatasetSymbol,type MemberSymbol,type ModelPort,type IntentType,type QueryExprType,type ResultColumn} from '../model.ts';
 
 // Small executable model fixture, independent of any production model.
-export function createFixtureModel(){
+export function createFixtureModel(database?:Pick<DatabasePort,'query'>){
     const string:Type={kind:'scalar',name:'String'},number:Type={kind:'scalar',name:'Float'};
     const deviceId:Type={kind:'nominal',name:'demo::DeviceId',inner:string};
     const tenantId:Type={kind:'nominal',name:'demo::TenantId',inner:string};
@@ -14,7 +15,7 @@ export function createFixtureModel(){
         tenant_id:{symbol:'tenant_id',kind:'dimension',id:'tenant_id',owner:'fixture/device_kpi',type:tenantId},
         cpu_usage:{symbol:'cpu_usage',kind:'measure',id:'cpu_usage',owner:'fixture/device_kpi',type:optional(number)}
     }};
-    const stats={checks:0,bindings:0};
+    const stats={checks:0,executions:0};
     type Slot={kind:'literal';value:any}|{kind:'parameter';index:number;type:Type};
     type Prepared={sql:string;slots:Slot[];columns:ResultColumn[];max_rows?:number};
     const quote=(s:string)=>'"'+s.replaceAll('"','""')+'"';
@@ -117,8 +118,8 @@ export function createFixtureModel(){
             const columns=Object.entries(fields).map(([name,t])=>({name,...storage(t)}));
             return {element:{kind:'schema',fields},container:intent.steps.at(-1)?.kind==='take_opt'?'option':'table',receipt:proofTarget(intent,model.contractId,encoded),maxRows,plan:{sql:text,slots,columns,max_rows:maxRows} satisfies Prepared};
         },
-        bind(plan:unknown,parameters:unknown[]){
-            stats.bindings++;
+        execute(plan:unknown,parameters:unknown[]){
+            stats.executions++;
             const checked=plan as Prepared;
             const bindings=checked.slots.map(slot=>{
                 const v=slot.kind==='literal'?slot.value:parameters[slot.index];
@@ -127,7 +128,8 @@ export function createFixtureModel(){
                 if(slot.kind==='parameter'&&present(slot.type).name==='Float'&&(typeof v!=='number'||!Number.isFinite(v)||v<0||v>100))fail('CPU threshold must be within 0..100');
                 return typeof v==='boolean'?Number(v):v;
             });
-            return {sql:checked.sql,bindings,columns:checked.columns.map(c=>({...c})),max_rows:checked.max_rows};
+            if(!database)fail('Fixture execution requires a backend database');
+            return {rows:database!.query(checked.sql,bindings),columns:checked.columns.map(c=>({...c})),max_rows:checked.max_rows};
         }
     };
     return {model,stats};

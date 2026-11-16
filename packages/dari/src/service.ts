@@ -10,7 +10,7 @@ const lines=createInterface({input:process.stdin,crlfDelay:Infinity});
 const requests=lines[Symbol.asyncIterator]();
 const {flags}=argumentsOf(process.argv.slice(2));
 for(const flag of Object.keys(flags))if(!['integration','options','database'].includes(flag))throw Error('Unknown option --'+flag);
-const integration=await loadIntegration(flags.integration,flags.options?JSON.parse(flags.options):{});
+const integration=await loadIntegration(flags.integration,{...(flags.options?JSON.parse(flags.options):{}),...(flags.database?{database:flags.database}:{})});
 const programs=new Map<string,Program>();
 try{
  for await(const line of requests){
@@ -27,7 +27,7 @@ try{
     if(!p){p=check(request.source,integration.checker,integration.options);if(programs.size>=8)programs.delete(programs.keys().next().value!);programs.set(key,p);}
     if(request.method==='check')result={types:[...p.bindings].filter(([,b])=>!b.internal).map(([name,b])=>({name,type:show(b.type)})),warnings:p.warnings.length?renderDiagnostics(p.source,p.warnings,'Warnings'):undefined};
     else{
-     if(!flags.database)throw Error('Execution requires --database');const db=new DatabaseSync(flags.database,{readOnly:true});
+     const db=new DatabaseSync(':memory:');
      try{const run=resolve(p,sqlite(db),request.inputs??{},{model:integration.executor,context:request.context,contextContractId:request.contextContractId});result={answer:run.answer,artifacts:run.artifacts,queries:run.queries,dataDocument:run.dataDocument,deliveryId:run.deliveryId};}finally{db.close();}
     }
    }else throw Error('Unknown DARI service method');

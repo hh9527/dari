@@ -154,15 +154,11 @@ export function lowerPlanBindings(declaration:Node,fresh:()=>string,globals:Read
   // Preserve model ownership of ordering/selection whenever it can consume the
   // complete query; post-projection transforms become ordinary SQL plan nodes.
   if(r.language==='query'&&r.projected&&(!['order_by','take','take_opt'].includes(operation.name)||r.steps.some((s:Node)=>['take','take_opt'].includes(s.name)))){
-   const scope=r.scope,selection:Node[]=[];
-   // Selection belongs after the projected input. Move it intact to the local
-   // typed pipeline when a following transform prevents one model query.
-   if(r.start.name!=='pair')while(['order_by','take','take_opt'].includes(r.steps.at(-1)?.name))selection.unshift(r.steps.pop()!);
-   if(selection.length)r.key={};
-   const name=materialize(r,'query projection');
+   // Keep remote ordering/take inside its acquisition boundary. A local
+   // successor consumes bounded rows, never a fragment of remote SQL.
+   const scope=r.scope,name=materialize(r,'query projection');
    r=fromTable(name,operation.at);
    for(const key of scope.keys())r.scope.set(key,r.row);
-   r.steps=selection.map((s:Node)=>rewrite(s,new Map([['out',r.row]])));
   }
   const operationScope=operation.name==='order_by'?new Map([...r.orderingScope??[],...r.scope]):r.scope;
   const step=rewrite(operation,operationScope);

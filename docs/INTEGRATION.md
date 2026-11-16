@@ -18,17 +18,21 @@ export async function createIntegration(options): Promise<Integration> {
 
 ## 模型的两阶段链接
 
-`ModelCheckPort` 发布 contractId、implementationId、types、datasets、relations 以及 `check_type(intent, encoded)`。输入包含类型化意图、稳定步骤身份及一次编码得到的 JSON/摘要/参数类型槽。返回 CheckedIntent：结果元素类型、容器、行数上界、opaque plan 与完整消费凭据。检查器不需要实现 `bind`，不接收运行期输入值，不读取业务行。
+`ModelCheckPort` 发布 contractId、implementationId、types、datasets、relations 以及 `check_type(intent, encoded)`。输入包含类型化意图、稳定步骤身份及一次编码得到的 JSON/摘要/参数类型槽。返回 CheckedIntent：结果元素类型、容器、行数上界、opaque plan 与完整消费凭据。检查器不需要实现 `execute`，不接收运行期输入值，不读取业务行。
 
-`ModelExecutionPort` 发布相同身份与 `bind(plan, parameters)`，只对已经证明的计划绑定值，返回参数化 SQL、绑定参数和输出列契约。执行器不需要实现 `check_type`。调用 `resolve(program, database, inputs, {model:executor, context, contextContractId})` 时显式提供执行端口；身份变化、输出列变化、超出上界均拒绝执行，不重新规划。
+`ModelExecutionPort` 发布相同身份与 `execute(plan, parameters)`，对已经证明的计划绑定值并在后端执行，返回 `RemoteResult`：rows、columns 和 max_rows。行使用已发布列类型的 wire 编码，核心统一校验并解码；适配器负责驱动值到该编码的转换。远端 SQL 及其参数化过程留在适配器内部。执行器不需要实现 `check_type`。调用 `resolve(program, database, inputs, {model:executor, context, contextContractId})` 时显式提供执行端口；身份变化、输出列变化、超出上界均拒绝执行，不重新规划。
 
 端口当前为同步接口；集成模块可异步初始化，网络/进程模型可由适配器使用持久工作进程桥接。语言文件不决定模型的位置、协议或技术栈。`ModelPort` 是两个接口的交集，集成方可以用同一个对象同时实现，但引擎分阶段消费。
 
-生成代码、Wasm、RPC、业务知识地址及生产模型源码均属于集成方。模型的 wire 协议到 Type、ValueCodec 和 PreparedQuery 的转换也由集成方实现。公共证明契约见 [模型 ABI](MODEL-ABI.md)。
+生成代码、Wasm、RPC、业务知识地址及生产模型源码均属于集成方。模型的 wire 协议到 Type、ValueCodec 和 RemoteResult 的转换也由集成方实现。公共证明契约见 [模型 ABI](MODEL-ABI.md)。
 
 ## 数据库
 
-`DatabasePort` 由连接所有者提供 `query(sql, parameters)` 和 `registerFunction(...)`，当前 dialect 为 sqlite。核心生成 SQL DAG，不导入 node:sqlite。可使用 `@hh9527/dari/sqlite` 的非拥有型适配器包装 DatabaseSync，连接创建、权限、事务与关闭均由调用方负责。
+`DatabasePort` 由连接所有者提供 `query(sql, parameters)` 和 `registerFunction(...)`，当前 dialect 为 sqlite。核心生成本地 SQL DAG，不导入 node:sqlite。端口还提供 materialize(name, columns, rows) 与 drop(name)，用于原子导入、清理独立临时表。列类型由已检查 Schema 决定；适配器不能根据样本推断结构。可使用 `@hh9527/dari/sqlite` 的非拥有型适配器包装 DatabaseSync，连接创建、权限、事务与关闭均由调用方负责。
+
+CLI/service 每次执行创建独立的内存 SQLite 工作库。`--database` 为可信 integration 提供 options.database，不作为本地工作库；纯本地程序无需该参数。集成模块按需打开业务数据库，检查与 LSP 不读取业务行。
+
+远端节点每次执行只取数一次。直接进入 tree 的结果不导入 SQLite；本地 query! 引用时按需导入一次，同次执行复用。导入按 codec 编码，并保存已证明排序的隐藏序号；隐藏列不进入用户 Schema 或展示。成功或失败结束时清理临时表。远端每个实际执行阶段须证明最多 500 行，单个展示输入须证明最多 110 行；执行时再核对实际行数。
 
 ## 展现与上下文
 

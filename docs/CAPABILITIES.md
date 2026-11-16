@@ -7,7 +7,7 @@
 | 有限计算、日历及共享语义类型 | dari-core | calendar、context-block、unwrap-or、ports |
 | 远端结果类型和领域算子约束 | ModelCheckPort | 独立夹具及 ports；生产能力由具体集成验收 |
 | 已证明模型计划的参数绑定 | ModelExecutionPort | ports 验证不重新检查或规划 |
-| 本地 SQL 执行 | DatabasePort；当前 SQLite 适配器 | 内存数据库 |
+| 本地 SQL 执行 | DatabasePort；SQLite 工作库及按需导入 | 独立内存数据库 |
 | tree、UseValue、Table、报告结构及数据回执 | dari-core | ports、selector、context-block |
 | 生产图表、额外有限函数、报告样式 | HostPort | 集成方验收 |
 | CLI、JSONL 服务、集成加载和独立运行包 | dari | 打包及服务验收 |

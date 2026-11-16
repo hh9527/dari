@@ -17,12 +17,12 @@ assert.throws(()=>compile('let a=from(src);let b=from(src);let output=project({n
 assert.throws(()=>compile('let a=from(src);let x=project({value:a.cpu});x |> order_by(asc(out.value)) |> take(1)'),/Unknown binding out/);
 assert.throws(()=>compile('let a=from(src);let x=project({value:a.cpu});x |> filter(a.cpu > 1.0) |> order_by(asc(x.value)) |> take(1)'),/not an input/);
 assert.deepEqual(run('let a=from(src);let a=from(src);a |> project({id:a.id}).as!(out) |> order_by(asc(out.id)) |> take(1)'),[{id:'a'}]);
-const {model}=createFixtureModel();
+const {model}=createFixtureModel(sqlite(db));
 const query=(body:string)=>check('data rows=query_remote! {'+body+'};answer tree! { Answer [Table(data = rows)]};',model);
 const q=query('let a=from(demo::DeviceKpi);let out=project({name:a.name,value:a.cpu_usage});out |> order_by(desc(out.value)) |> take(2)');
 assert.deepEqual(resolve(q,sqlite(db)).values.rows,[{name:'B',value:30},{name:'C',value:20}]);
 assert.equal(show(q.bindings.get('rows')!.type),'Table(Schema({name: String, value: Option(Float)}))');
-const after=query('let a=from(demo::DeviceKpi);let selected=a |> filter(a.cpu_usage > 10.0);let result=project({name:selected.name,value:selected.cpu_usage});result |> filter(unwrap_or!(result.value,0.0) < 30.0) |> order_by(asc(result.name)) |> take(10)');
+const after=query('let a=from(demo::DeviceKpi);let selected=a |> filter(a.cpu_usage > 10.0);let result=project({name:selected.name,value:selected.cpu_usage});result |> order_by(desc(result.value)) |> take(3) |> filter(unwrap_or!(result.value,0.0) < 30.0) |> order_by(asc(result.name)) |> take(10)');
 assert.deepEqual(resolve(after,sqlite(db)).values.rows,[{name:'C',value:20}]);
 assert(!after.bindings.has('result'));assert(!after.bindings.has('selected'));
 assert(Object.keys(resolve(after,sqlite(db)).values).every(name=>!name.startsWith('@')));

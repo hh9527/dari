@@ -12,9 +12,10 @@ import {inSubnet} from './ipv4.ts';
 import {same,projectionType,type Program,type Type,type Plan} from './compiler.ts';
 import type {Node} from './syntax.ts';
 import {renderDiagnostics} from './diagnostics.ts';
-import type {DatabasePort} from './database.ts';
+import type {DatabasePort,SqlRow,LocalColumn} from './database.ts';
 import type {ModelExecutionPort} from './model.ts';
-import {storage,type PreparedQuery} from './model.ts';
+import {storage} from './model.ts';
+import {MAX_RESULT_ROWS,MAX_PRESENTATION_ROWS} from './plan.ts';
 import {createHash,randomUUID} from 'node:crypto';
 const quote=(s:string)=>'"'+s.replaceAll('"','""')+'"';
 const display=(v:any):string=>v&&typeof v==='object'&&typeof v.tag==='string'?(Object.hasOwn(v,'value')?v.tag+'('+String(v.value)+')':v.tag):String(v??'无数据');
@@ -56,14 +57,38 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
  const runId=randomUUID(),startedAt=new Date().toISOString();
  let scopes:Record<string,any>[]=[];
  let contextSnapshot:any;let contextLoaded=false;
- const acquisitions:{binding:string;sql:string;parameters:unknown[];startedAt:string;elapsedMillis:number;rowCount:number}[]=[];
+ const acquisitions:{binding:string;kind:'local'|'remote';sql?:string;parameters:unknown[];startedAt:string;elapsedMillis:number;rowCount:number}[]=[];
  function execute(name:string,text:string,args:any[]){
   const startedAt=new Date().toISOString(),start=performance.now();queries++;
   const rows=db.query(text,args);
-  acquisitions.push({binding:name,sql:text,parameters:args,startedAt,elapsedMillis:performance.now()-start,rowCount:rows.length});
+  acquisitions.push({binding:name,kind:'local',sql:text,parameters:args,startedAt,elapsedMillis:performance.now()-start,rowCount:rows.length});
   return rows;
  }
- const prepared=new Map<string,PreparedQuery>();
+ const remoteRows=new Map<string,SqlRow[]>(),materialized=new Map<string,string>();
+ function remote(name:string):SqlRow[]{
+  const cached=remoteRows.get(name);if(cached)return cached;
+  const b=p.bindings.get(name)!,bound=b.result?.maxRows;
+  if(bound===undefined||bound>MAX_RESULT_ROWS)throw Error('Remote execution requires a proven bound <= '+MAX_RESULT_ROWS+': '+name);
+  const parameters=b.parameters!.map(value),startedAt=new Date().toISOString(),start=performance.now();queries++;
+  const result=model!.execute(b.modelPlan,parameters);
+  const expected=Object.entries(b.result!.element.fields!).map(([name,t])=>({name,...storage(t)}));
+  if(!result||!Array.isArray(result.rows)||!Array.isArray(result.columns)||result.max_rows===undefined||!Number.isInteger(result.max_rows)||result.max_rows<0||result.max_rows>bound||result.columns.length!==expected.length||result.columns.some((c,i)=>c.name!==expected[i].name||c.type!==expected[i].type||c.nullable!==expected[i].nullable))throw Error('Model transform contradicts published type/bound: '+name);
+  if(result.rows.length>bound||result.rows.length>result.max_rows)throw Error('Model result exceeds published row bound: '+name);
+  const fields=b.result!.element.fields!;
+  for(const row of result.rows)if(!row||typeof row!=='object'||Array.isArray(row)||Object.keys(row).length!==expected.length||Object.keys(row).some(key=>!Object.hasOwn(fields,key)))throw Error('Model result Schema does not match the published fields: '+name);
+  const rows=result.rows.map(row=>convert(b.result!.element,row,'decode'));
+  acquisitions.push({binding:name,kind:'remote',parameters,startedAt,elapsedMillis:performance.now()-start,rowCount:rows.length});
+  remoteRows.set(name,rows);return rows;
+ }
+ function materializeRemote(name:string):string{
+  const previous=materialized.get(name);if(previous)return previous;
+  const b=p.bindings.get(name)!,rows=remote(name),fields=b.result!.element.fields!;
+  const columns:LocalColumn[]=Object.entries(fields).map(([name,t])=>{const physical=storage(t);return {name,type:['Int','Bool','EpochMillis'].includes(physical.type)?'integer':physical.type==='Float'?'real':'text',nullable:physical.nullable};});
+  columns.push(...b.result!.ordering.map(o=>({name:o.key,type:'integer' as const,nullable:false})));
+  const encoded=rows.map((row,i)=>({...Object.fromEntries(Object.entries(fields).map(([key,t])=>[key,encodeValue(t,row[key])])),...Object.fromEntries(b.result!.ordering.map(o=>[o.key,i]))}));
+  const table='_dari_'+runId.replaceAll('-','')+'_'+materialized.size;
+  db.materialize(table,columns,encoded);materialized.set(name,table);return table;
+ }
  function expressionType(n:Node):Type|undefined {
   if(n.resolvedType)return n.resolvedType;
   if(n.k==='call')return p.types.get(n.name);
@@ -147,16 +172,7 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
    return 'SELECT '+Object.keys(fields).map((key,index)=>'column'+(index+1)+' AS '+quote(key)).join(', ')+' FROM (VALUES '+tuples.join(', ')+')';
   }
   if(b.kind==='source')return 'SELECT * FROM '+quote(b.ast.args[0].value);
-  if(b.kind==='model'){
-   let q=prepared.get(name);
-   if(!q){
-    q=model!.bind(b.modelPlan,b.parameters!.map(value));
-    const expected=Object.entries(b.result!.element.fields!).map(([name,t])=>({name,...storage(t)}));
-    if((b.result!.maxRows===undefined?q.max_rows!==undefined:q.max_rows===undefined||!Number.isInteger(q.max_rows)||q.max_rows<0||q.max_rows>b.result!.maxRows)||q.columns.length!==expected.length||q.columns.some((c,i)=>c.name!==expected[i].name||c.type!==expected[i].type||c.nullable!==expected[i].nullable))throw Error('Model transform contradicts published type/bound: '+name);
-    prepared.set(name,q);
-   }
-   args.push(...q.bindings);return q.sql.replace(/;\s*$/,'');
-  }
+  if(b.kind==='model')return 'SELECT * FROM temp.'+quote(materializeRemote(name));
   if(b.kind!=='select')throw Error('Not a query '+name);
   return planSql(b.plan!,args);
  }
@@ -266,7 +282,8 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
  }
  function globalBinding(name:string):any {
   if(cache.has(name))return cache.get(name);const b=p.bindings.get(name)!;let v:any;
-  if(b.kind==='select'||b.kind==='model'){if(b.internal)throw Error('A node-local relation plan cannot be materialized independently');if(b.result?.maxRows===undefined||b.result.maxRows>500)throw Error('Cannot materialize an unbounded intermediate plan: '+name);const args:any[]=[];const text=sql(name,args);v=execute(name,text,args).map(row=>({...row}));
+  if(b.kind==='model'){v=remote(name);if(b.type.kind==='option')v=v.length?{tag:'Some',value:v[0]}:{tag:'None'};}
+  else if(b.kind==='select'){if(b.internal)throw Error('A node-local relation plan cannot be materialized independently');if(b.result?.maxRows===undefined||b.result.maxRows>500)throw Error('Cannot materialize an unbounded intermediate plan: '+name);const args:any[]=[];const text=sql(name,args);v=execute(name,text,args).map(row=>({...row}));
    if(b.result?.maxRows!==undefined&&v.length>b.result.maxRows)throw Error('Model result exceeds published row bound: '+name);
    const element=b.result!.element;
    v=v.map((row:any)=>convert(element,row,'decode'));
@@ -317,6 +334,7 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
  }
  function renderChart(n:Node):import('./host.ts').FigureOutput {
   const a=Object.fromEntries(n.attrs.map((f:Node)=>[f.name,f.value]));const ref=(key:string)=>a[key].path[0];
+  for(const key of ['data','nodes'])if(a[key]){const b=p.bindings.get(ref(key));if(b?.result?.maxRows===undefined||b.result.maxRows>MAX_PRESENTATION_ROWS||binding(ref(key)).length>MAX_PRESENTATION_ROWS)throw Error('Presentation requires a proven and actual bound <= '+MAX_PRESENTATION_ROWS);}
   if(n.checkedSpec&&p.host){
    const rows=(name:string)=>binding(name).map((row:any)=>Object.fromEntries(Object.entries(row).map(([k,v]:[string,any])=>[k,v&&typeof v==='object'&&typeof v.tag==='string'?display(v):v])));
    // Resolve inputs outside the rendering catch: an upstream failure keeps its own location.
@@ -383,5 +401,6 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
   }
   const s=children();return /^h[123]$/.test(n.name)?'#'.repeat(Number(n.name[1]))+' '+s:n.name==='strong'?'**'+s+'**':n.name==='em'?'*'+s+'*':s;
  }
- const answer=binding(p.answer);const dataDocument=['answer',...includedReports].flatMap(scope=>{const values=valueSections.get(scope);return [...(dataSections.get(scope)??[]),...(values?.length?['## '+scope.replace(/^reports\//,'report/')+'/values\n\n'+values.join('\n')]:[])];}).join('\n\n');return {answer,artifacts,queries,dataDocument,deliveryId:runId,values:Object.fromEntries([...cache].filter(([name])=>!p.bindings.get(name)?.internal))};
+ try {const answer=binding(p.answer);const dataDocument=['answer',...includedReports].flatMap(scope=>{const values=valueSections.get(scope);return [...(dataSections.get(scope)??[]),...(values?.length?['## '+scope.replace(/^reports\//,'report/')+'/values\n\n'+values.join('\n')]:[])];}).join('\n\n');return {answer,artifacts,queries,dataDocument,deliveryId:runId,values:Object.fromEntries([...cache].filter(([name])=>!p.bindings.get(name)?.internal))};
+ }finally{for(const table of materialized.values())db.drop(table);}
 }

@@ -696,7 +696,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
   try{
   if(p.types.has(d.name)||p.bindings.has(d.name))err(d,'Duplicate declaration '+d.name);
   if(d.k==='type'){const t=type(d.value);if(t.kind==='nominal'&&d.value.name==='struct')t.name=d.name;p.types.set(d.name,t);continue;}
-  let t:Type,kind='value',plan:Plan|undefined,modelShape:CheckedIntent|undefined;const parameters:Node[]=[];
+  let t:Type,kind='value',plan:Plan|undefined,modelShape:CheckedIntent|undefined,modelOrdering:Ordering[]=[];const parameters:Node[]=[];
   if(d.value.k==='context'){
    if(d.declarationKind!=='data')err(d,'context! must directly initialize a top-level data declaration');
    if(p.contextType?.kind!=='schema')err(d,'context! requires a host-provided Schema contract');
@@ -752,6 +752,8 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    if(take?.kind==='take'&&(shape.maxRows===undefined||shape.maxRows>take.count))err(d,'Model result bound exceeds the authored take('+take.count+')');
    if(shape.element.kind!=='schema'||shape.maxRows!==undefined&&(!Number.isInteger(shape.maxRows)||shape.maxRows<0||shape.maxRows>MAX_RESULT_ROWS))err(d,'Model query must publish a record Schema and valid result bound');
    for(const t of Object.values(shape.element.fields!)){const base=present(t);if(!['scalar','nominal'].includes(base.kind))err(d,'Model columns must be logical scalars');}
+   if(shape.maxRows===undefined||shape.maxRows>MAX_RESULT_ROWS)err(d,'Remote execution requires a proven result bound <= '+MAX_RESULT_ROWS,{code:'query-bound',reason:'每个实际执行的远端阶段必须先有界，本地下游不能限制远端取数',suggestion:'在远端阶段结束前 order_by(...) |> take(n)，n <= 500，再进行本地后处理'});
+   if(intent.steps.some(s=>s.kind==='order_by')){let key='_dari_remote_order';while(Object.hasOwn(shape.element.fields!,key))key+='_';modelOrdering=[{key,direction:'asc'}];}
    t={kind:shape.container,inner:shape.element};kind='model';modelShape=shape;
   }
   else if(d.value.k==='tree'){t=tree(d.value.root);kind='tree';}
@@ -765,7 +767,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    if(role==='data'&&['answer','figure','report','content'].includes(t!.kind))err(d,'data requires a data value; put charts inline in report or answer');
    if(['report','answer'].includes(role)&&(d.value.k!=='tree'||t!.kind!==role))err(d,role+' requires tree! with a '+(role==='answer'?'Answer':role==='report'?'Report':'chart or Table')+' root');
   }
-  if(d.annotation){const wanted=type(d.annotation);if(!compatible(wanted,t!))err(d,'Declaration annotation expects '+show(wanted)+'; got '+show(t!),mismatchDetails(wanted,t!));}if(d.editorBinding){const b=d.editorBinding;p.references.push({at:b.nameAt??b.at,path:[b.displayName??b.name],type:t!,rootType:t!});}p.bindings.set(d.name,{internal:!!d.internal,type:t!,ast:d.value,kind,plan,modelPlan:modelShape?.plan,parameters,result:plan?.result??(modelShape?{element:modelShape.element,container:t!.kind==='option'?'option':'table',maxRows:modelShape.maxRows,ordering:[]}:kind==='literal_table'?{element:t!.inner!,container:'table',maxRows:d.value.args[0].items.length,ordering:[]}:kind==='source'?{element:t!.inner!,container:'table',ordering:[]}:undefined)});
+  if(d.annotation){const wanted=type(d.annotation);if(!compatible(wanted,t!))err(d,'Declaration annotation expects '+show(wanted)+'; got '+show(t!),mismatchDetails(wanted,t!));}if(d.editorBinding){const b=d.editorBinding;p.references.push({at:b.nameAt??b.at,path:[b.displayName??b.name],type:t!,rootType:t!});}p.bindings.set(d.name,{internal:!!d.internal,type:t!,ast:d.value,kind,plan,modelPlan:modelShape?.plan,parameters,result:plan?.result??(modelShape?{element:modelShape.element,container:t!.kind==='option'?'option':'table',maxRows:modelShape.maxRows,ordering:modelOrdering}:kind==='literal_table'?{element:t!.inner!,container:'table',maxRows:d.value.args[0].items.length,ordering:[]}:kind==='source'?{element:t!.inner!,container:'table',ordering:[]}:undefined)});
   }catch(error){finding(error);if(!p.bindings.has(d.name)&&!p.types.has(d.name))failed.add(d.name);}
  }
  if(diagnostics.hasErrors()&&!partial)throw new DiagnosticFailure(source,diagnostics.list());
