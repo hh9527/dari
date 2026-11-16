@@ -53,7 +53,7 @@ export class LanguageServer {
   if(Buffer.byteLength(doc.text)>262144){this.notify('textDocument/publishDiagnostics',{uri:doc.uri,version:doc.version,diagnostics:[{range:rangeAt(doc.text,0,1),severity:1,source:'dari',message:'Document exceeds 256 KiB'}]});return;}
   const result=analyze(doc.text,this.integration.checker,this.integration.options);doc.program=result.program;doc.entries=entries(doc.text);
   const findings=[...result.diagnostics,...result.program?.warnings??[]];
-  this.notify('textDocument/publishDiagnostics',{uri:doc.uri,version:doc.version,diagnostics:findings.map(d=>({range:rangeAt(doc.text,d.at,wordAt(doc.text,d.at).end-d.at||1),severity:d.code==='model-unavailable'||result.program?.warnings.includes(d)?2:1,source:'dari',code:d.code??d.stage,message:[d.message,d.reason&&'原因：'+d.reason,d.suggestion&&'修复建议：'+d.suggestion].filter(Boolean).join('\n')}))});
+  this.notify('textDocument/publishDiagnostics',{uri:doc.uri,version:doc.version,diagnostics:findings.map(d=>({range:rangeAt(doc.text,d.at,d.end!==undefined?d.end-d.at:wordAt(doc.text,d.at).end-d.at||1),severity:d.code==='model-unavailable'||result.program?.warnings.includes(d)?2:1,source:'dari',code:d.code??d.stage,...(d.related?{data:{modelLocations:d.related}}:{}),message:[d.message,d.reason&&'原因：'+d.reason,d.suggestion&&'修复建议：'+d.suggestion].filter(Boolean).join('\n')}))});
  }
  handle(method:string,params:any):unknown {
   if(method==='initialize')return {capabilities:{positionEncoding:'utf-16',textDocumentSync:{openClose:true,change:2},completionProvider:{triggerCharacters:['.',':','$']},hoverProvider:true,definitionProvider:true,documentSymbolProvider:true},serverInfo:{name:'dari',version:'0.1.0'}};

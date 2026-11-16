@@ -52,7 +52,7 @@ export function lowerPlanBindings(declaration:Node,fresh:()=>string,globals:Read
  function emit(value:Node,label:string):string{
   const name=fresh();definitions.push({k:'internal_plan',name,value,at:value.at,internal:true,owner:declaration.owner??declaration.name,label});return name;
  }
- function ast(r:Relation):Node{return {k:r.language,bindings:r.bindings,start:r.start,steps:r.steps,editorBindings:r.editorBindings,at:block.at,loweredBindings:true};}
+ function ast(r:Relation):Node{return {k:r.language,bindings:r.bindings,start:r.start,steps:r.steps,editorBindings:r.editorBindings,at:block.at,end:block.end,loweredBindings:true};}
  function materialize(r:Relation,label:string):string{
   const previous=materialized.get(r.key);if(previous)return previous;
   const name=emit(ast(r),label);materialized.set(r.key,name);return name;

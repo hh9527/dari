@@ -1,3 +1,4 @@
+import {SourceOffsets,type SourceEvidence} from './source.ts';
 import {builtinComponents,commonAttributes,componentContract,type ComponentContract} from './components.ts';
 import {calendarTypes,calendarFunctions} from './calendar.ts';
 import {precision} from './format.ts';
@@ -6,7 +7,7 @@ import {sharedTypes,semantic,timeType} from './shared-types.ts';
 import {hasPlanBindings,lowerPlanBindings,resolvePlanNames} from './bindings.ts';
 import {lowerNodeBindings} from './node-bindings.ts';
 import {faultDiagnostic,DiagnosticCollector,DiagnosticFailure,UpstreamTypeUnavailable,modelErrorText} from './diagnostics.ts';
-import {encodeIntent,proofTarget,verifyReceipt,storage} from './model.ts';
+import {encodeIntent,proofTarget,verifyReceipt,storage,ModelCheckFailure} from './model.ts';
 import type {ModelCheckPort as ModelPort,CheckedIntent,IntentType,QueryExprType,QueryOperation} from './model.ts';
 import {parse,Fault,type FaultDetails,type Node} from './syntax.ts';
 import {MAX_RESULT_ROWS,MAX_PRESENTATION_ROWS,type Plan,type ResultContract,type Ordering} from './plan.ts';
@@ -82,8 +83,24 @@ export function analyze(source:string,model?:ModelPort,options:CheckOptions={}):
 function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:boolean;contextType?:Type;contextContractId?:string;host?:HostPort}={},diagnostics=new DiagnosticCollector(),partial=false):Program{
  const p:Program={treeNodes:[],references:[],types:new Map(Object.entries(builtinTypes)),bindings:new Map(),answer:'answer',source,warnings:[],model,modelContractId:model?.contractId,modelImplementationId:model?.implementationId,contextType:options.contextType,contextContractId:options.contextContractId,host:options.host};
  const failed=new Set<string>();let asset:string|undefined;
- const modelLocations=new WeakMap<QueryExprType,Node>();
+ const modelLocations=new WeakMap<object,Node>();
+ const sourceOffsets=new SourceOffsets(source);
+ function sourceEvidence(value:object):SourceEvidence|undefined {
+  const node=modelLocations.get(value);if(!node)return;
+  const span=sourceOffsets.toBytes(node.sourceStart??node.at,node.end??node.at);
+  const fields=node.k==='object'?Object.fromEntries(node.fields.map((f:Node)=>[f.name,sourceOffsets.toBytes(f.at,f.keyEnd??f.at+f.name.length)]).filter((entry:any)=>entry[1])):undefined;
+  return {span,fields};
+ }
  function modelFailure(error:unknown,intent:IntentType,query:Node):Fault{
+  const modelDiagnostics=(error as ModelCheckFailure|undefined)?.diagnostics;
+  if(error instanceof Error&&Array.isArray(modelDiagnostics)&&modelDiagnostics.every(d=>typeof d.message==='string')){
+   const findings=modelDiagnostics.map(d=>{
+    const valid=(Array.isArray(d.locs)?d.locs:[]).flatMap(loc=>loc?.source==='<input>'&&loc.start&&loc.end?(()=>{const range=sourceOffsets.toChars({start:loc.start.offset,end:loc.end.offset});return range?[range]:[];})():[]);
+    const fallback=modelFailure(new Error(d.message),intent,query);
+    return {at:valid[0]?.start??fallback.at,...fallback.details,end:valid[0]?.end,message:fallback.message,stage:'model' as const,expression:valid[0]?source.slice(valid[0].start,valid[0].end):fallback.details.expression,related:d.locs};
+   });
+   if(findings.length)return new DiagnosticFailure(source,findings);
+  }
   const names=new Map<string,string>();
   function collect(n:Node){
    if(n.k==='ref'&&n.displayPath)names.set(n.path[0],n.displayPath[0]);
@@ -115,7 +132,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
   if(/direct member reference/.test(message))for(const step of intent.steps)if(step.kind==='project'&&step.value.kind==='record')for(const expr of Object.values(step.value.fields))if(expr.kind!=='member')return new Fault(message,modelLocations.get(expr)?.at??query.at,{stage:'model',code:'model-projection',reason:'模型仅证明已发布成员及明确支持的时间转换、not_none 投影',suggestion:'query_remote! 投影需要的成员，后续 query! 处理派生表达式；保持聚合前后筛选口径不变'});
   return new Fault(message,query.at,{stage:'model',code:'model-capability',reason:'模型未能证明该查询满足已发布的领域能力',suggestion:'根据模型拒绝原因及 模型集成发布的符号与类型契约 契约修正；不要删除筛选、关系或业务类型以绕过校验'});
  }
- function finding(error:unknown){if(error instanceof UpstreamTypeUnavailable)return;if(!(error instanceof Fault))throw error;diagnostics.report(faultDiagnostic(error,'type',asset));}
+ function finding(error:unknown){if(error instanceof DiagnosticFailure){for(const d of error.diagnostics)diagnostics.report(d);return;}if(error instanceof UpstreamTypeUnavailable)return;if(!(error instanceof Fault))throw error;diagnostics.report(faultDiagnostic(error,'type',asset));}
  function calculation(n:Node,t:Type,operation:string){const policy=present(t).codec?.operations;if(policy&&!policy.includes(operation))err(n,show(t)+' does not allow '+operation+'; allowed calculations: '+policy.join(', '),{code:'business-operation',reason:'业务类型只允许其契约发布的计算，物理数值表示相同不代表算子可互换',suggestion:'使用该类型允许的计算；若是不同指标的并列展示，保留各自类型并使用宽表多序列，不剥离类型来绕过限制'});}
  function ordering(n:Node,t:Type){const codec=present(t).codec;if(codec?.variants&&!codec.order?.length)err(n,show(t)+' has no declared business ordering',{code:'business-ordering',reason:'语义分类投影不继承原始字符串或整数的排序能力',suggestion:'选择 raw 字段排序，或由模型通过独立的业务排序 property 声明次序'});calculation(n,t,'Compare');}
  function settle<T,R>(items:T[],work:(item:T)=>R):R[]{let invalid=false;const result:R[]=[];for(const item of items){try{result.push(work(item));}catch(error){finding(error);invalid=true;}}if(invalid)throw new UpstreamTypeUnavailable();return result;}
@@ -416,7 +433,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    if(call.k!=='call'||call.name!=='from'||call.args.length!==1||call.args[0].k!=='ref'||call.args[0].path.length!==1)err(binding,'from requires an exported static Dataset symbol in query_remote!');
    const symbol=call.args[0].path[0],dataset=Object.hasOwn(model!.datasets,symbol)?model!.datasets[symbol]:undefined;
    if(!dataset)return err(call.args[0],'Unknown model Dataset symbol '+symbol);
-   const index=nodes.length;aliases.set(binding.name,index);nodes.push({kind:'node',index,id:'node_'+index,dataset});
+   const index=nodes.length;aliases.set(binding.name,index);const node={kind:'node' as const,index,id:'node_'+index,dataset};nodes.push(node);modelLocations.set(node,call.args[0]);
   }
   let pair:IntentType['pair'];
   if(n.start.k==='call'&&n.start.name==='pair'){
@@ -500,6 +517,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
   }
   const steps:QueryOperation[]=[];
   for(const step of n.steps){
+   const before=steps.length;
    if(step.name==='connect'){
     const [relation,from,to]=step.args;
     if(step.args.length!==3||relation.k!=='ref'||relation.path.length!==1||from.k!=='ref'||from.path.length!==1||to.k!=='ref'||to.path.length!==1)err(step,'connect requires a published Relation symbol and two bound nodes');
@@ -528,8 +546,9 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
     if(step.args.length!==1||step.args[0].k!=='literal'||!Number.isInteger(step.args[0].value)||step.args[0].value<1||step.args[0].value>MAX_RESULT_ROWS)err(step,'take requires a static integer 1..500');
     steps.push({kind:'take',count:step.args[0].value});
    }else err(step,'Unsupported model query operation '+step.name);
+   for(const added of steps.slice(before))modelLocations.set(added,step);
   }
-  return {kind:'query',nodes,root:pair?.left??aliases.get(n.start.path[0])!,...(pair?{pair}:{}),steps:steps.map((step,i)=>({...step,id:'step_'+i}))};
+  const intent:IntentType={kind:'query',nodes,root:pair?.left??aliases.get(n.start.path[0])!,...(pair?{pair}:{}),steps:steps.map((step,i)=>{const result={...step,id:'step_'+i};const origin=modelLocations.get(step);if(origin)modelLocations.set(result,origin);return result;})};modelLocations.set(intent,n);return intent;
  }
  function constant(n:Node|undefined,fields?:Record<string,Type>,path='option'):any{
   if(!n)return err({k:'literal',at:0},'Expected a previously declared static option');
@@ -711,7 +730,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
   else if(d.value.k==='query'){
    if(!model)err(d,'query requires a model type/transform adapter');
    const intent=modelQuery(d.value,parameters);
-   const encoded=encodeIntent(intent);
+   const encoded=encodeIntent(intent,sourceEvidence);
    const expectedProof=proofTarget(intent,model!.contractId,encoded);
    let shape!:CheckedIntent;try{shape=model!.check_type(intent,encoded);}catch(error){throw modelFailure(error,intent,d.value);}
    try{verifyReceipt(shape.receipt,expectedProof);}catch(e){err(d,(e as Error).message);}

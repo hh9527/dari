@@ -16,3 +16,9 @@ export type {ResultColumn,QueryExprType,QueryOperation} from './model.ts';
 
 export {builtinComponents,commonAttributes,componentContract} from './components.ts';
 export type {ComponentContract,AttributeContract} from './components.ts';
+
+export {ModelCheckFailure} from './model.ts';
+export type {ModelDiagnostic} from './model.ts';
+export {SourceOffsets,canonicalIntent} from './source.ts';
+export type {SourceSpan,InputOrigin,SourceEvidence} from './source.ts';
+export type {ModelLocation} from './syntax.ts';

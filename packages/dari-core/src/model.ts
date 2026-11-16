@@ -1,6 +1,8 @@
 import type {Type} from './compiler.ts';
+import {canonicalIntent,type InputOrigin,type SourceEvidence} from './source.ts';
+import type {ModelLocation} from './syntax.ts';
 import {createHash} from 'node:crypto';
-export const MODEL_ABI_VERSION='dari-model/v2';
+export const MODEL_ABI_VERSION='dari-model/v3';
 
 export type ValueCodec={variants?:readonly string[];order?:readonly string[];operations?:readonly string[];parse(value:unknown):unknown;encode(value:unknown):unknown;decode(value:unknown):unknown};
 
@@ -65,12 +67,15 @@ export function storage(t:Type):{type:string;nullable:boolean}{
 }
 
 // This encodes the complete finite intent. It performs no domain lowering.
-export function encodeIntent(intent:IntentType){
+export function encodeIntent(intent:IntentType,sourceOf:(value:object)=>SourceEvidence|undefined=()=>undefined){
+    const evidence=new WeakMap<object,SourceEvidence>();
+    function mark<T extends object>(wire:T,source:object):T{const entry=sourceOf(source);if(entry)evidence.set(wire,entry);return wire;}
+    function expression(e:QueryExprType):unknown{return mark(expressionValue(e) as object,e);}
     const constants=new Map<number,unknown>(),parameterTypes=new Map<number,Type>();
     let next=0;
     function scan(e:QueryExprType){if(e.kind==='calendar_bucket')scan(e.timeZone);if(e.kind==='parameter')next=Math.max(next,e.index+1);if(e.kind==='binary'){scan(e.left);scan(e.right);}if(e.kind==='unary')scan(e.value);if(e.kind==='record')Object.values(e.fields).forEach(scan);if(e.kind==='call')e.args.forEach(scan);}
     for(const s of intent.steps){if(s.kind==='filter')scan(s.predicate);if(s.kind==='project')scan(s.value);if(s.kind==='order_by')s.terms.forEach(t=>scan(t.value));}
-    function expression(e:QueryExprType):unknown{
+    function expressionValue(e:QueryExprType):unknown{
         switch(e.kind){
             case 'member':return {kind:e.kind,node:intent.nodes[e.node].id,member:e.member.symbol};
             case 'mapped_comparison':return {kind:e.kind,value:expression({kind:'member',node:e.node,member:e.member}),logical:e.logical,member:e.value,op:e.op};
@@ -78,7 +83,7 @@ export function encodeIntent(intent:IntentType){
             case 'to_datetime_utc':return {kind:e.kind,value:expression({kind:'member',node:e.node,member:e.member})};
             case 'utc_bucket':return {kind:e.kind,value:expression({kind:e.conversion?'to_datetime_utc':'member',node:e.node,member:e.member}),unit:e.unit};
             case 'output':return {kind:e.kind,name:e.name};
-            case 'record':return {kind:e.kind,fields:Object.entries(e.fields).map(([name,value])=>({name,value:expression(value)}))};
+            case 'record':return {kind:e.kind,fields:Object.entries(e.fields).map(([name,value])=>{const field={name,value:expression(value)},span=sourceOf(e)?.fields?.[name];if(span)evidence.set(field,{span,fields:{name:span}});return field;})};
             case 'call':return {kind:e.kind,name:e.name,args:e.args.map(expression)};
             case 'binary':return {kind:e.kind,op:e.op,left:expression(e.left),right:expression(e.right)};
             case 'unary':return {kind:e.kind,op:e.op,value:expression(e.value)};
@@ -93,7 +98,7 @@ export function encodeIntent(intent:IntentType){
             default:throw Error('Unsupported intent expression '+(e as {kind:string}).kind);
         }
     }
-    const wire={root:intent.nodes[intent.root].id,...(intent.pair?{pair:{left:intent.nodes[intent.pair.left].id,right:intent.nodes[intent.pair.right].id}}:{}),nodes:intent.nodes.map(n=>({id:n.id,dataset:n.dataset.symbol})),steps:intent.steps.map(step=>{
+    const wire=mark({root:intent.nodes[intent.root].id,...(intent.pair?{pair:{left:intent.nodes[intent.pair.left].id,right:intent.nodes[intent.pair.right].id}}:{}),nodes:intent.nodes.map(n=>mark({id:n.id,dataset:n.dataset.symbol},n)),steps:intent.steps.map(step=>{
         let body:unknown;
         switch(step.kind){
             case 'connect':body={relation:step.relation.symbol,from:intent.nodes[step.from].id,to:intent.nodes[step.to].id};break;
@@ -105,10 +110,19 @@ export function encodeIntent(intent:IntentType){
             case 'take_opt':body={};break;
             default:throw Error('Unsupported model operation '+(step as {kind:string}).kind);
         }
-        return {id:step.id,kind:step.kind,body};
-    })};
-    const json=JSON.stringify(wire),digest=createHash('sha256').update(json).digest('hex');
-    return {json,digest,constants,parameterTypes};
+        if(body&&typeof body==='object'&&!evidence.has(body))mark(body,step);
+        return mark({id:step.id,kind:step.kind,body},step);
+    })},intent);
+    const origins:InputOrigin[]=[];
+    function collect(value:unknown,path:(string|number)[],parent?:SourceEvidence['span']){
+        const entry=value&&typeof value==='object'?evidence.get(value):undefined,span=entry?.span??parent;
+        if(span)origins.push({path,span});
+        if(Array.isArray(value))value.forEach((item,i)=>collect(item,[...path,i],span));
+        else if(value&&typeof value==='object')for(const [key,item]of Object.entries(value)){const field=entry?.fields?.[key]??span;if(field)origins.push({path:[...path,key],span:field,key:true});collect(item,[...path,key],field);}
+    }
+    collect(wire,[]);
+    const json=canonicalIntent(wire),digest=createHash('sha256').update(json).digest('hex');
+    return {wire,origins,json,digest,constants,parameterTypes};
 }
 
 export type EncodedIntent=ReturnType<typeof encodeIntent>;
@@ -117,4 +131,11 @@ export function proofTarget(intent:IntentType,contractId:string,encoded:EncodedI
 }
 export function verifyReceipt(actual:ProofReceipt|undefined,expected:ProofReceipt){
     if(!actual||actual.contractId!==expected.contractId||actual.inputDigest!==expected.inputDigest||!Array.isArray(actual.consumedStepIds)||actual.consumedStepIds.length!==expected.consumedStepIds.length||actual.consumedStepIds.some((id,i)=>id!==expected.consumedStepIds[i]))throw Error('Model proof receipt does not cover the complete intent');
+}
+
+/** Structured backend diagnostics retain rule locations and temporary input subjects. */
+export type ModelDiagnostic={message:string;locs?:ModelLocation[]};
+export class ModelCheckFailure extends Error {
+ readonly diagnostics:ModelDiagnostic[];
+ constructor(diagnostics:ModelDiagnostic[]){super(diagnostics.map(d=>d.message).join('; ')||'Model query validation failed');this.diagnostics=diagnostics;}
 }
