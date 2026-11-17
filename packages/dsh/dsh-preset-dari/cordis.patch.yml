@@ -1,0 +1,69 @@
+# Dari 问数的 agent 组合：知识发现、DARI 分析、只读输出工具与追问。
+# 浏览器端插件由 web profile 的 bundles 单独加载，不在这里。
+- insert:
+    - id: preset-dari
+      name: "@deepseek-ai/dsh-agent-preset"
+      config:
+        id: dari
+        name: Dari 问数
+        description: 业务问句 → 查询结果：词汇规整、知识发现、DARI 分析、只读查询与答案交付。
+        order: 5
+        plugins:
+          - id: fs-observation-policy
+            name: "@deepseek-ai/dsh-fs-observation-policy"
+          - id: tool-fs
+            name: "@deepseek-ai/dsh-tool-fs"
+          - id: tool-fs-search
+            name: "@deepseek-ai/dsh-tool-fs-search"
+            config:
+              sampleOverCapGlobResults: false
+          - id: persona
+            name: "@deepseek-ai/dsh-persona"
+            config:
+              includeRuntimeContext: false
+              prefix: ''
+          - id: tool-ask-user
+            name: "@deepseek-ai/dsh-tool-ask-user"
+          - id: tool-skill
+            name: "@deepseek-ai/dsh-tool-skill"
+          - id: present
+            name: "@deepseek-ai/dsh-tool-present"
+          - id: dari
+            name: "@local/dsh-plugin-dari"
+            config: {}
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: "@deepseek-ai/dsh-compaction-basic"
+              - id: command-compact
+                name: "@deepseek-ai/dsh-command-compact"
+              - id: tool-result-pruner
+                name: "@deepseek-ai/dsh-compaction-tool-result-pruner"
+                config:
+                  # 阈值管"小于这个数就别动它"：64K 之下原样进上下文；head/tail 只服务更大的输出。
+                  thresholdChars: 65536
+                  headChars: 4096
+                  tailChars: 1024
+
+- insert:
+    - id: preset-dari-vocabulary
+      name: "@deepseek-ai/dsh-agent-preset"
+      config:
+        id: dari-vocabulary
+        name: Dari 词汇助手
+        description: 完整领域词汇对齐与归属定位。
+        plugins:
+          - id: dari-vocabulary
+            name: "@local/dsh-plugin-dari"
+            config:
+              vocabularyHelper: true
+
+# 新会话默认落在 Dari 问数上；用户选择过的 preset 优先级更高。
+- id: agent-preset-registry
+  config:
+    default: dari

@@ -1,0 +1,5 @@
+{
+ "name":"@local/dsh-preset-dari","private":true,"version":"0.1.0","type":"module",
+ "description":"Dari 的 agent 组合：宿主侧插件与提示词，不含浏览器端",
+ "dsh":{"bundle":{"patch":"./cordis.patch.yml"}}
+}
