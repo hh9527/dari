@@ -170,7 +170,7 @@ export function createWorkerRunner(config: Settings, log: LogFn,
     });
     // 初始化失败（或之后崩溃）都当作这一代的死亡；下一次 send 会重新拉起。
     created.on('message', (message: RunnerReply) => {
-      if (message?.kind === 'ready') { log(`[data-seer] worker ready (globals restored: ${message.restored})`); return; }
+      if (message?.kind === 'ready') { log(`[dari] worker ready (globals restored: ${message.restored})`); return; }
       const entry = pending.get(message?.id);
       if (entry === undefined) return;
       pending.delete(message.id);
@@ -181,13 +181,13 @@ export function createWorkerRunner(config: Settings, log: LogFn,
     // 只有**当前这一代**的死亡才能影响排队请求：被超时 terminate 的旧代，它的 exit
     // 事件会晚到，而那时 worker 已经指向新一代了——不设这道门槛就会误杀新一代的请求。
     created.on('error', (cause: Error) => {
-      log(`[data-seer] worker error: ${errorText(cause)}`);
+      log(`[dari] worker error: ${errorText(cause)}`);
       if (worker !== created) return;
       worker = null;
       failAll(cause);
     });
     created.on('exit', (code) => {
-      log(`[data-seer] worker exited with code ${code}`);
+      log(`[dari] worker exited with code ${code}`);
       if (worker !== created) return;
       worker = null;
       failAll(new Error(`wasm worker exited with code ${code}`));
@@ -213,7 +213,7 @@ export function createWorkerRunner(config: Settings, log: LogFn,
     pending.set(id, { resolve, reject, timer });
     target.postMessage({ id, line });
   }).catch((cause: unknown) => {
-    log(`[data-seer] worker request failed: ${errorText(cause)}`);
+    log(`[dari] worker request failed: ${errorText(cause)}`);
     throw cause;
   });
 
@@ -231,11 +231,11 @@ export function createRunner(config: Settings, log: LogFn, bytes = readFileSync(
   const module = new WebAssembly.Module(bytes);
   if (WebAssembly.Module.customSections(module, 'telora.snapshot').length === 0) {
     throw new Error(
-      `data-seer: 模型 ${config.model} 里没有 telora.snapshot 段。`
+      ` 模型 ${config.model} 里没有 telora.snapshot 段。`
       + '当前只支持快照产物，请按 README 的「快照怎么来」用 `--snapshot` 重新构建。',
     );
   }
-  log(`[data-seer] in-process wasm worker (model ${config.model})`);
+  log(`[dari] in-process wasm worker (model ${config.model})`);
   return createWorkerRunner(config, log, module);
 }
 
@@ -294,7 +294,7 @@ export function createExecutor(config: Settings, log: LogFn): Executor {
       workerData: { dataFile: config.dataFile },
     });
     created.on('message', (message: ExecutorReply) => {
-      if (message?.kind === 'ready') { log(`[data-seer] executor ready (read-only ${config.dataFile})`); return; }
+      if (message?.kind === 'ready') { log(`[dari] executor ready (read-only ${config.dataFile})`); return; }
       const entry = pending.get(message?.id);
       if (entry === undefined) return;
       pending.delete(message.id);
@@ -304,13 +304,13 @@ export function createExecutor(config: Settings, log: LogFn): Executor {
     });
     // 同模型宿主：晚到的旧代 exit 不能影响新一代的排队请求。
     created.on('error', (cause: Error) => {
-      log(`[data-seer] executor error: ${errorText(cause)}`);
+      log(`[dari] executor error: ${errorText(cause)}`);
       if (worker !== created) return;
       worker = null;
       failAll(cause);
     });
     created.on('exit', (code) => {
-      log(`[data-seer] executor exited with code ${code}`);
+      log(`[dari] executor exited with code ${code}`);
       if (worker !== created) return;
       worker = null;
       failAll(new Error(`sqlite executor exited with code ${code}`));

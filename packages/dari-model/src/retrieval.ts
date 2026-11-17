@@ -46,11 +46,11 @@ export interface IndexWorkspace {
 /** Execute the trusted build-time knowledge program and validate its result. */
 export async function buildRetrievalIndex(entry: IndexWorkspace, sha: string, log: LogFn): Promise<RetrievalIndex> {
   if (!isRecord(entry.publishedKnowledge) || entry.publishedKnowledge.knowledge_contract !== programmedKnowledgeContract) {
-    throw new Error(`data-seer: knowledge publication requires ${programmedKnowledgeContract}; rebuild the model`);
+    throw new Error(` knowledge publication requires ${programmedKnowledgeContract}; rebuild the model`);
   }
   const result = await collectProgrammedKnowledge(entry.publishedKnowledge);
   const index = derivePublishedKnowledge(result.graph, entry.presentationItems, result.vocabulary);
-  log(`[data-seer] build-time knowledge ${sha} · ${index.keys.size} facts`);
+  log(`[dari] build-time knowledge ${sha} · ${index.keys.size} facts`);
   return index;
 }
 

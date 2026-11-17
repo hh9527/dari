@@ -88,14 +88,14 @@ function resolveZone(requested: unknown, context: ContextTimeZone | undefined): 
   }
   if (context?.kind === 'resolved') return { zone: assertZone(context.timeZone), source: 'context' };
   if (context?.kind === 'mixed') {
-    throw new Error('data-seer: 本次请求带进来的浏览器时区不一致（' + context.timeZones.join(', ')
+    throw new Error(' 本次请求带进来的浏览器时区不一致（' + context.timeZones.join(', ')
       + '）。按规范应向用户澄清用哪个时区，或显式传 timeZone。');
   }
   if (context?.kind === 'invalid') {
-    throw new Error('data-seer: 本次请求带的浏览器时区不合法（' + String(context.timeZone)
+    throw new Error(' 本次请求带的浏览器时区不合法（' + String(context.timeZone)
       + '）。请向用户确认时区，或显式传 timeZone。');
   }
-  throw new Error('data-seer: 本次请求没有带浏览器时区。请向用户确认时区后显式传入 timeZone，'
+  throw new Error(' 本次请求没有带浏览器时区。请向用户确认时区后显式传入 timeZone，'
     + '或让请求带上浏览器时区——上下文时区按插件规范从用户消息读取。');
 }
 

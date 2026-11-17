@@ -46,7 +46,7 @@ export function createTimeContext({ ctx, log }: { ctx: PluginContext; log: LogFn
         return decision;
       });
     } catch (cause) {
-      log('[data-seer] cannot observe agent/pre-step: ' + errorText(cause));
+      log('[dari] cannot observe agent/pre-step: ' + errorText(cause));
     }
   };
 

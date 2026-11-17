@@ -3,7 +3,7 @@ import { encodePart } from './knowledge-graph.ts';
 import { isRecord, type ToolExec } from './host.ts';
 import type { Knowledge } from './knowledge.ts';
 
-export const DOMAIN_SUMMARY_URI = 'data-seer://domain/summary.md';
+export const DOMAIN_SUMMARY_URI = 'dari://domain/summary.md';
 
 /** A catalogue, not a second knowledge graph: no vocabulary or navigation edges. */
 export function domainSummary(graph: object, domain: string) {

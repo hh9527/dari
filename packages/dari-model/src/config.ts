@@ -68,7 +68,7 @@ export function loadWorkspaceConfig(root: string): WorkspaceConfigResult {
     if (!declaration || typeof declaration !== 'object' || Array.isArray(declaration)) throw new Error('配置必须为对象');
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') {
-      throw new Error(`data-seer: 无法读取工作区配置 ${file}（${errorText(cause)}）。请修正该配置。`);
+      throw new Error(` 无法读取工作区配置 ${file}（${errorText(cause)}）。请修正该配置。`);
     }
   }
   const resolve = (value: unknown): string | undefined => (typeof value === 'string' && value.length > 0
@@ -93,7 +93,7 @@ export function workspaceRootFor(exec: WorkspaceProbe | undefined): { root: stri
     } catch { /* 这一层取不到，试下一层 */ }
   }
   throw new Error(
-    'data-seer: 无法确定当前会话的工作区目录（会话头里没有 cwd），因此不知道用哪个模型。'
+    ' 无法确定当前会话的工作区目录（会话头里没有 cwd），因此不知道用哪个模型。'
     + '工作区是会话属性，来源是会话头的 cwd——请让会话带上它。',
   );
 }
@@ -122,7 +122,7 @@ export function resolveSettings(root: string, config: PluginConfig | undefined):
   if (typeof settings.model !== 'string' || settings.model.length === 0) missing.push('model');
   if (missing.length > 0) {
     throw new Error(
-      `data-seer: 当前部署及工作区未配置必要声明: ${missing.join(', ')}。`
+      ` 当前部署及工作区未配置必要声明: ${missing.join(', ')}。`
       + '请由用户在部署 profile 配置，或在 '+workspace.file+' 声明 { "domain":"<知识服务领域名>","model":"<相对 dari.json 的 .wasm 路径>"}，'
       + '请用户指定模型，不要搜索历史目录或猜选模型。',
     );
