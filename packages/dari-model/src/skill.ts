@@ -31,9 +31,9 @@ export function createSkillRegistration(ctx: PluginContext, log: LogFn): () => b
     try {
       ctx.effect(() => skills.register({ ...SKILL, content: SKILL_CONTENT }));
       registered = true;
-      log(`[oks] skill "${SKILL.name}" registered (runtime) · ${Buffer.byteLength(SKILL_CONTENT, 'utf8')} bytes`);
+      log(`[data-seer] skill "${SKILL.name}" registered (runtime) · ${Buffer.byteLength(SKILL_CONTENT, 'utf8')} bytes`);
     } catch (cause) {
-      log(`[oks] cannot register skill "${SKILL.name}": ${errorText(cause)}`);
+      log(`[data-seer] cannot register skill "${SKILL.name}": ${errorText(cause)}`);
       registered = true;
     }
     return registered;

@@ -58,8 +58,8 @@ export function createKnowledge({ ctx, log, config }: {
     const dataFile = settings.dataFile;
     if (typeof dataFile !== 'string' || dataFile.length === 0) {
       throw new Error(
-        `dsh-oks: ${settings.workspaceFile} 没有声明 dataFile，pipeline 中的 query 无处可查。`
-        + '需要 {"dataFile":"<相对 oks.json 的 .sqlite 路径>"}；'
+        `data-seer: ${settings.workspaceFile} 没有声明 dataFile，pipeline 中的 query 无处可查。`
+        + '需要 {"dataFile":"<相对 data-seer.json 的 .sqlite 路径>"}；'
         + '领域知识可通过 dari_kg_discover、dari_kg_routes 和 dari_kg_info 获取。',
       );
     }
@@ -67,13 +67,13 @@ export function createKnowledge({ ctx, log, config }: {
     if (existing !== undefined) return existing;
     if (!existsSync(dataFile)) {
       throw new Error(
-        `dsh-oks: ${settings.workspaceFile} 声明的 dataFile 不存在：${dataFile}`,
+        `data-seer: ${settings.workspaceFile} 声明的 dataFile 不存在：${dataFile}`,
       );
     }
     const manifest = readDataManifest(dataFile);
     const entry: ExecutorEntry = { executor: createExecutor(settings, log), manifest };
     executors.set(dataFile, entry);
-    log(`[oks] read-only executor for ${dataFile}`
+    log(`[data-seer] read-only executor for ${dataFile}`
       + `${manifest?.revision ? ` · data revision=${manifest.revision}` : ''}`
       + `${manifest?.window ? ` · window=[${manifest.window.start}, ${manifest.window.endExclusive})` : ''}`);
     return entry;
@@ -107,7 +107,7 @@ export function createKnowledge({ ctx, log, config }: {
     };
     existing?.runner?.dispose();
     workspaces.set(root, entry);
-    log(`[oks] workspace ${root} (cwd from ${from}) · domain=${settings.domain} · model=${settings.model}`);
+    log(`[data-seer] workspace ${root} (cwd from ${from}) · domain=${settings.domain} · model=${settings.model}`);
     return entry;
   };
 

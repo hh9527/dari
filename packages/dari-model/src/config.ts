@@ -17,8 +17,8 @@ export const DEFAULTS = {
   requireRunApproval: false,
 };
 
-/** 工作区 oks.json 里插件认得的声明。 */
-export interface OksDeclaration {
+/** 工作区 data-seer.json 里插件认得的声明。 */
+export interface DataSeerDeclaration {
   domain?: string;
   model?: string;
   dataFile?: string;
@@ -30,7 +30,7 @@ export interface OksDeclaration {
 }
 
 /** 部署 profile 的默认设置与宿主集成配置（VA 配置见 src/va.ts）。 */
-export interface PluginConfig extends OksDeclaration {
+export interface PluginConfig extends DataSeerDeclaration {
   dari?: { service?:string; integration?:string };
   vocabularyHelper?: boolean;
   vaPreset?: string;
@@ -54,27 +54,27 @@ export interface Settings {
 interface WorkspaceConfigResult {
   root: string;
   file: string;
-  oks: OksDeclaration;
+  declaration: DataSeerDeclaration;
   model: string | undefined;
   dataFile: string | undefined;
 }
 
 /** 工作区配置可省略；其中的相对路径以工作区为基准。 */
 export function loadWorkspaceConfig(root: string): WorkspaceConfigResult {
-  const file = join(root, 'oks.json');
-  let oks: OksDeclaration = {};
+  const file = join(root, 'data-seer.json');
+  let declaration: DataSeerDeclaration = {};
   try {
-    oks = JSON.parse(readFileSync(file, 'utf8')) as OksDeclaration;
-    if (!oks || typeof oks !== 'object' || Array.isArray(oks)) throw new Error('配置必须为对象');
+    declaration = JSON.parse(readFileSync(file, 'utf8')) as DataSeerDeclaration;
+    if (!declaration || typeof declaration !== 'object' || Array.isArray(declaration)) throw new Error('配置必须为对象');
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') {
-      throw new Error(`dsh-oks: 无法读取工作区配置 ${file}（${errorText(cause)}）。请修正该配置。`);
+      throw new Error(`data-seer: 无法读取工作区配置 ${file}（${errorText(cause)}）。请修正该配置。`);
     }
   }
   const resolve = (value: unknown): string | undefined => (typeof value === 'string' && value.length > 0
     ? (value.startsWith('/') ? value : join(root, value))
     : undefined);
-  return { root, file, oks, model: resolve(oks.model), dataFile: resolve(oks.dataFile) };
+  return { root, file, declaration, model: resolve(declaration.model), dataFile: resolve(declaration.dataFile) };
 }
 
 /** 会话 → 工作区目录。工作区是**会话属性**（会话头里的 cwd），不是进程属性；
@@ -93,7 +93,7 @@ export function workspaceRootFor(exec: WorkspaceProbe | undefined): { root: stri
     } catch { /* 这一层取不到，试下一层 */ }
   }
   throw new Error(
-    'dsh-oks: 无法确定当前会话的工作区目录（会话头里没有 cwd），因此不知道用哪个模型。'
+    'data-seer: 无法确定当前会话的工作区目录（会话头里没有 cwd），因此不知道用哪个模型。'
     + '工作区是会话属性，来源是会话头的 cwd——请让会话带上它。',
   );
 }
@@ -102,13 +102,13 @@ export function workspaceRootFor(exec: WorkspaceProbe | undefined): { root: stri
 export function resolveSettings(root: string, config: PluginConfig | undefined): Settings {
   const workspace = loadWorkspaceConfig(root);
   // 工作区显式声明 > 部署 profile 默认配置 > 通用默认值。
-  const declared = Object.fromEntries(Object.entries(workspace.oks).filter(([key, value]) =>
+  const declared = Object.fromEntries(Object.entries(workspace.declaration).filter(([key, value]) =>
     Object.hasOwn(DEFAULTS, key) && value !== undefined));
   const settings: Settings = {
     ...DEFAULTS,
     ...Object.fromEntries(Object.entries(config ?? {}).filter(([key, value]) => Object.hasOwn(DEFAULTS, key) && value !== undefined)),
     ...declared,
-    domain: workspace.oks.domain ?? config?.domain ?? '',
+    domain: workspace.declaration.domain ?? config?.domain ?? '',
     model: workspace.model ?? config?.model ?? '',
     dataFile: workspace.dataFile ?? config?.dataFile,
     workspaceRoot: root,
@@ -122,8 +122,8 @@ export function resolveSettings(root: string, config: PluginConfig | undefined):
   if (typeof settings.model !== 'string' || settings.model.length === 0) missing.push('model');
   if (missing.length > 0) {
     throw new Error(
-      `dsh-oks: 当前部署及工作区未配置必要声明: ${missing.join(', ')}。`
-      + '请由用户在部署 profile 配置，或在 '+workspace.file+' 声明 { "domain":"<知识服务领域名>","model":"<相对 oks.json 的 .wasm 路径>"}，'
+      `data-seer: 当前部署及工作区未配置必要声明: ${missing.join(', ')}。`
+      + '请由用户在部署 profile 配置，或在 '+workspace.file+' 声明 { "domain":"<知识服务领域名>","model":"<相对 data-seer.json 的 .wasm 路径>"}，'
       + '请用户指定模型，不要搜索历史目录或猜选模型。',
     );
   }

@@ -58,7 +58,7 @@ export function createDariTools(options:{config:PluginConfig['dari'];knowledge:K
    const deliveryId=result.deliveryId;
    await publish(deliveryId+'-data.md',result.dataDocument);
    await publish(deliveryId+'-answer.md',answer);
-   const messageId=deliveryId;agent.inject({id:messageId,role:'user',source:{kind:'push-to-user',label:'dsh-oks',href:fileUrls.get(deliveryId+'-answer.md')!},content:[{type:'text',text:'Answer delivered: '+deliveryId}]});
+   const messageId=deliveryId;agent.inject({id:messageId,role:'user',source:{kind:'push-to-user',label:'data-seer',href:fileUrls.get(deliveryId+'-answer.md')!},content:[{type:'text',text:'Answer delivered: '+deliveryId}]});
    return {text:'Succeed\n-------\n- answer message: '+messageId+'\nThe Answer is delivered; do not repeat it. Use the following displayed data for observations; HTML/SVG reading is unnecessary.\n\n'+result.dataDocument};
   }
  })),{
