@@ -7,3 +7,5 @@ export { createIntegration } from './dari-integration.ts';
 export { readDariSource } from './source-file.ts';
 export { ENABLE_OKS_SEARCH } from './features.ts';
 export { isRecord, isArray } from './util.ts';
+export { openModel } from './telora-model.ts';
+export { timeWindows, timeWindowOptions } from './time-windows.ts';
