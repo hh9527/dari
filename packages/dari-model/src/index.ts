@@ -11,3 +11,5 @@ export { openModel } from './telora-model.ts';
 export { timeWindows, timeWindowOptions } from './time-windows.ts';
 export { parseChartSpec, parseTableSpec, missingColumns, shapeProblem } from './chart/spec.ts';
 export type { OptionInput } from './chart/option.ts';
+export { tableMarkdown } from './view/table.ts';
+export { SERIES_COLORS } from './chart/shared.ts';
