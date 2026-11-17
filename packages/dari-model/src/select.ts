@@ -8,7 +8,7 @@ const leaf = (value:JsonValue):Selected => ({kind:'leaf',value});
 const materialize = (node:Selected):JsonValue => node.kind==='leaf' ? node.value : Object.fromEntries([...node.fields].map(([key,value])=>[key,materialize(value)]));
 const help = '\nselect 示例：ports.rows；{rows,columns}；items[0:25]:map({id,name})；datasets:map({grain,dimensions:keys})；a?.b.{c?:len,d}。'
   +'\n路径可用 . 开头；组合投影使用 {…}；select 作用于资源或 transform 结果，不含工具外层 data 包装。'
-  +'\n完整语法：oks://help/project.md';
+  +'\n完整语法：data-seer://help/project.md';
 const error = (message:string):never => {throw new Error(message+help);};
 const merge = (a:Selected,b:Selected,path:string):Selected => {
   if(a.kind!=='object'||b.kind!=='object')return error(`select result conflict at ${path}`);

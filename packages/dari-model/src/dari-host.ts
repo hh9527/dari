@@ -66,7 +66,7 @@ function presentationSpec(raw:Record<string,unknown>,name:string,fields:Record<s
   axisType=mode==='time'?(role==='DateTimeUtc'?'Rfc3339':role):mode==='value'?storage(type!):'String';
   delete raw.x_axis;
  }else if(raw.x_axis!==undefined)throw Error('x_axis belongs to LineChart or AreaChart');
- if(!barNames.has(name)&&(raw.orientation!==undefined||raw.category!==undefined||raw.mode!==undefined||raw.metrics!==undefined))throw Error('orientation/category/mode/metrics belong to bar chart contracts; use the component mappings in oks://help/dari-figures.md');
+ if(!barNames.has(name)&&(raw.orientation!==undefined||raw.category!==undefined||raw.mode!==undefined||raw.metrics!==undefined))throw Error('orientation/category/mode/metrics belong to bar chart contracts; use the component mappings in data-seer://help/dari-figures.md');
  if(barNames.has(name)){
   if(raw.x!==undefined)throw Error(name+' uses category: $.field');
   if(raw.stack!==undefined)throw Error('StackedBarChart uses mode: StackMode::Absolute or StackMode::Percent; other bar charts are parallel');
