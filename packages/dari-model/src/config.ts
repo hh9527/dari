@@ -17,7 +17,7 @@ export const DEFAULTS = {
   requireRunApproval: false,
 };
 
-/** 工作区 data-seer.json 里插件认得的声明。 */
+/** 工作区 dari.json 里插件认得的声明。 */
 export interface DataSeerDeclaration {
   domain?: string;
   model?: string;
@@ -61,7 +61,7 @@ interface WorkspaceConfigResult {
 
 /** 工作区配置可省略；其中的相对路径以工作区为基准。 */
 export function loadWorkspaceConfig(root: string): WorkspaceConfigResult {
-  const file = join(root, 'data-seer.json');
+  const file = join(root, 'dari.json');
   let declaration: DataSeerDeclaration = {};
   try {
     declaration = JSON.parse(readFileSync(file, 'utf8')) as DataSeerDeclaration;
@@ -123,7 +123,7 @@ export function resolveSettings(root: string, config: PluginConfig | undefined):
   if (missing.length > 0) {
     throw new Error(
       `data-seer: 当前部署及工作区未配置必要声明: ${missing.join(', ')}。`
-      + '请由用户在部署 profile 配置，或在 '+workspace.file+' 声明 { "domain":"<知识服务领域名>","model":"<相对 data-seer.json 的 .wasm 路径>"}，'
+      + '请由用户在部署 profile 配置，或在 '+workspace.file+' 声明 { "domain":"<知识服务领域名>","model":"<相对 dari.json 的 .wasm 路径>"}，'
       + '请用户指定模型，不要搜索历史目录或猜选模型。',
     );
   }
