@@ -21,6 +21,9 @@
           # 澄清通道：工作流派生问题时必须能结构化提问。
           - id: tool-ask-user
             name: "@deepseek-ai/dsh-tool-ask-user"
+            # 考官模式：考生提问一直等到有答复，不自行超时继续。
+            config:
+              timeout: -1
           # 工作流入门技能：插件注册 dari-work 时依赖它。
           - id: tool-skill
             name: "@deepseek-ai/dsh-tool-skill"
