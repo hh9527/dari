@@ -13,8 +13,8 @@ const INJECTED_CLIENT_MODULES = new Set([
   '@deepseek-ai/dsh-client-ui-primitives', '@deepseek-ai/dsh-client-ui-dockkit',
 ]);
 const packages = [
-  { dir: 'dsh-dari', source: 'dsh-dari', extra: ['locale', 'icon.svg', 'cordis.patch.yml'] },
-  { dir: 'dsh-dari-client', source: 'dsh-dari-client', extra: ['cordis.patch.yml'] },
+  { dir: 'dsh-plugin-dari', source: 'dsh-plugin-dari', extra: ['locale', 'icon.svg', 'cordis.patch.yml'] },
+  { dir: 'dsh-plugin-dari-client', source: 'dsh-plugin-dari-client', extra: ['cordis.patch.yml'] },
 ];
 
 for (const { dir, source, extra } of packages) {

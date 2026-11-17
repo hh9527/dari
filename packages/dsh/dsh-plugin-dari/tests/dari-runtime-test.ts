@@ -9,8 +9,8 @@ const repo=fileURLToPath(new URL('../../../../',import.meta.url));
 const root=mkdtempSync(join(tmpdir(),'dari-pinned-runtime-'));
 try{
  const plugin=join(root,'plugin');
- cpSync(join(repo,'dist/dsh-dari/lib'),join(plugin,'lib'),{recursive:true});
- cpSync(join(repo,'dist/dsh-dari/dari-runtime'),join(plugin,'dari-runtime'),{recursive:true});
+ cpSync(join(repo,'dist/dsh-plugin-dari/lib'),join(plugin,'lib'),{recursive:true});
+ cpSync(join(repo,'dist/dsh-plugin-dari/dari-runtime'),join(plugin,'dari-runtime'),{recursive:true});
  const revision=JSON.parse(readFileSync(join(plugin,'dari-runtime/source.json'),'utf8'));
  assert.equal(revision.commit,execFileSync('git',['-C',repo,'rev-parse','HEAD'],{encoding:'utf8'}).trim());
  assert(existsSync(join(plugin,'lib/model-worker.mjs')));

@@ -44,7 +44,7 @@ pnpm test
 
 构建和 pretest 更新 dist/dsh-oks/lib 与 dari-runtime；执行前告知并确认运行环境不会提前加载未验收产物。测试临时文件使用 TMPDIR。默认套件不要求真实工作区，模型集成通过 tests/dari-adapter-test.ts 显式运行，独立 bundle 冒烟通过 tests/smoke.ts 验证。
 
-安装及独立环境配置见[仓库说明](../../README.md)。插件通过宿主附件服务持久保存 SVG 与 HTML。Answer 使用 push-to-user 消息投递，可见卡片由 @local/dsh-dari-client 渲染。
+安装及独立环境配置见[仓库说明](../../README.md)。插件通过宿主附件服务持久保存 SVG 与 HTML。Answer 使用 push-to-user 消息投递，可见卡片由 @local/dsh-plugin-dari-client 渲染。
 
 ## 手册维护
 

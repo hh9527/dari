@@ -14,7 +14,7 @@ export default defineConfig([
     format: 'esm',
     platform: 'node',
     target: 'node22',
-    outDir: '../../../dist/dsh-dari/lib',
+    outDir: '../../../dist/dsh-plugin-dari/lib',
     clean: true,
     dts: false,
     hash: false,

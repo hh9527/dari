@@ -1,7 +1,7 @@
 # 插件是独立的安装单元：dari 引擎的 npm install 不包含这里。
 packages:
-  - dsh-dari
-  - dsh-dari-client
+  - dsh-plugin-dari
+  - dsh-plugin-dari-client
 
 catalog:
   typescript: ^7.0.2
