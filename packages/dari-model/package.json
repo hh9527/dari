@@ -1,0 +1,9 @@
+{
+ "name":"@hh9527/dari-model","version":"0.1.0","type":"module","private":true,
+ "description":"DARI model capabilities independent of any agent host: tree rendering, charts, time and value presentation, remote query bridge",
+ "engines":{"node":">=24"},
+ "exports":{".":"./dist/index.js"},
+ "files":["dist"],
+ "scripts":{"build":"tsc -p tsconfig.json","typecheck":"tsc -p tsconfig.json --noEmit"},
+ "dependencies":{"@hh9527/dari-core":"0.1.0","@js-temporal/polyfill":"^0.5.1","echarts":"^6.1.0"}
+}

@@ -1,6 +1,6 @@
 {
  "name":"dari-workspace","private":true,"type":"module","workspaces":["packages/*"],
  "engines":{"node":">=24"},
- "scripts":{"build":"npm run build -w @hh9527/dari-core && npm run build -w @hh9527/dari","typecheck":"npm run build -w @hh9527/dari-core && npm run typecheck -w @hh9527/dari","test":"node tests/run.mjs","check":"npm run typecheck && npm test"},
+ "scripts":{"build":"npm run build -w @hh9527/dari-core && npm run build -w @hh9527/dari-model && npm run build -w @hh9527/dari","typecheck":"npm run build -w @hh9527/dari-core && npm run typecheck -w @hh9527/dari-model && npm run typecheck -w @hh9527/dari","test":"node tests/run.mjs","check":"npm run typecheck && npm test"},
  "devDependencies":{"@types/node":"^24.0.0","typescript":"^5.9.3"}
 }
