@@ -65,8 +65,8 @@ export function renderDomainSummary(graph: object, domain: string): string {
   const summary = domainSummary(graph, domain) as unknown as SummaryShape;
   const note = (item: { name?: string; doc: string }) => [item.name, item.doc].filter(Boolean).map(value => prose(value!)).join('：');
   const lines = ['# 全局领域摘要', '', '领域：'+code(domain), '',
-    '本摘要概览领域对象、数据集和关系。具体字段、度量、身份映射、连接条件与约束按需通过 oks_discover / oks_routes / oks_info 获取；先调用 va_ask；oks_discover 每条 query 的 entity/props/values 只能逐字使用其返回的 ASCII 英文词表原词，不自行翻译、改写或拼接。', '',
-    '概念速查：oks_discover({queries:[{entity:"device",props:["cpu"]}]})；示例词须先由 va_ask 返回，values 可省略。返回 # Entity / ## Dataset 下的成员相对路径与类型；将 Dataset ID 与相对路径连接后交给 oks_info。路径发现使用 oks_routes({from:"datasets/a",to:"datasets/b"})，精确读取使用 oks_info({ids:["datasets/ID/measures/ID"]})。query 使用知识定义提供的短名称。'+(ENABLE_OKS_SEARCH?' 补充定域搜索：oks_search({q:["cpu"],scope:["datasets/ID"]})，q 只使用 VA 原词。':''), '',
+    '本摘要概览领域对象、数据集和关系。具体字段、度量、身份映射、连接条件与约束按需通过 dari_kg_discover / dari_kg_routes / dari_kg_info 获取；先调用 dari_vocab；dari_kg_discover 每条 query 的 entity/props/values 只能逐字使用其返回的 ASCII 英文词表原词，不自行翻译、改写或拼接。', '',
+    '概念速查：dari_kg_discover({queries:[{entity:"device",props:["cpu"]}]})；示例词须先由 dari_vocab 返回，values 可省略。返回 # Entity / ## Dataset 下的成员相对路径与类型；将 Dataset ID 与相对路径连接后交给 dari_kg_info。路径发现使用 dari_kg_routes({from:"datasets/a",to:"datasets/b"})，精确读取使用 dari_kg_info({ids:["datasets/ID/measures/ID"]})。query 使用知识定义提供的短名称。'+(ENABLE_OKS_SEARCH?' 补充定域搜索：dari_kg_search({q:["cpu"],scope:["datasets/ID"]})，q 只使用 VA 原词。':''), '',
     '## 业务实体（Entity）', '',
     ...summary.entities.map(e=>'- '+code('entities/'+encodePart(e.id))+(note(e)?'：'+note(e):'')), '',
     '## 数据集与查询能力（Dataset）', '',

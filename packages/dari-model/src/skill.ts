@@ -4,7 +4,7 @@ import { errorText } from './host.ts';
 import type { LogFn, PluginContext, SkillsService } from './host.ts';
 
 /** rank 250：工作区自己的 skill(100/200) 能覆盖它，用户级(400/500) 不能。 */
-const SKILL_CONTENT = '# 数据分析入口\n\n工作方法、DARI 手册和工作纪律已按 workflow → dari → rules 完整载入系统上下文，无需为了开始任务调用 oks_read。按已载入说明理解意图、检索领域知识、在同一份 .dari 中设计和检查查询、解析并交付。仅所选图表的 dari-figures.md 分册按需读取；三份已载入手册只在逐字引用或上下文压缩后重读。\n';
+const SKILL_CONTENT = '# 数据分析入口\n\n工作方法、DARI 手册和工作纪律已按 workflow → dari → rules 完整载入系统上下文，无需为了开始任务调用 dari_read。按已载入说明理解意图、检索领域知识、在同一份 .dari 中设计和检查查询、解析并交付。仅所选图表的 dari-figures.md 分册按需读取；三份已载入手册只在逐字引用或上下文压缩后重读。\n';
 
 export const SKILL = {
   name: 'oks-query',
