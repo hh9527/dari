@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node
 import { join } from 'node:path';
 
 const root = join(import.meta.dirname);
-const distRoot = join(root, '..', 'dist');
+const distRoot = join(root, '..', '..', 'dist');
 // 客户端插件只能 require 宿主模块图注入的包；其余依赖必须在构建期打进来。
 const INJECTED_CLIENT_MODULES = new Set([
   'react', 'react/jsx-runtime', 'react-dom', 'react-dom/client',

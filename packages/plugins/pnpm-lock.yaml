@@ -36,11 +36,11 @@ importers:
   dsh-dari:
     dependencies:
       '@hh9527/dari-core':
-        specifier: link:../../packages/dari-core
-        version: link:../../packages/dari-core
+        specifier: link:../../../packages/dari-core
+        version: link:../../dari-core
       '@hh9527/dari-model':
-        specifier: link:../../packages/dari-model
-        version: link:../../packages/dari-model
+        specifier: link:../../../packages/dari-model
+        version: link:../../dari-model
       '@js-temporal/polyfill':
         specifier: 'catalog:'
         version: 0.5.1

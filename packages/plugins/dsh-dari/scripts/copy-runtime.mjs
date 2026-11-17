@@ -1,7 +1,7 @@
 import {copyFileSync,rmSync,writeFileSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-const root=new URL('../../../',import.meta.url);
+const root=new URL('../../../../',import.meta.url);
 const engine=new URL('./',root);
 const runtime=new URL('dist/dsh-dari/dari-runtime/',root);
 for(const name of ['model-worker.mjs','located-input.mjs','telora-wasm.mjs'])copyFileSync(new URL('../src/'+name,import.meta.url),new URL('dist/dsh-dari/lib/'+name,root));

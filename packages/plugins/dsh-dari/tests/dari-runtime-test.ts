@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {DatabaseSync} from 'node:sqlite';
-const repo=fileURLToPath(new URL('../../../',import.meta.url));
+const repo=fileURLToPath(new URL('../../../../',import.meta.url));
 const root=mkdtempSync(join(tmpdir(),'dari-pinned-runtime-'));
 try{
  const plugin=join(root,'plugin');
