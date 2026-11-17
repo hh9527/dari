@@ -13,3 +13,37 @@ export { parseChartSpec, parseTableSpec, missingColumns, shapeProblem } from './
 export type { OptionInput } from './chart/option.ts';
 export { tableMarkdown } from './view/table.ts';
 export { SERIES_COLORS } from './chart/shared.ts';
+
+// 知识导航、检索与工具实现的宿主无关层。
+export * from './host.ts';
+export * from './config.ts';
+export * from './key.ts';
+export * from './time.ts';
+export * from './time-context.ts';
+export * from './response.ts';
+export * from './read.ts';
+export * from './project.ts';
+export * from './select.ts';
+export * from './single-flight.ts';
+export * from './service-metadata.ts';
+export * from './semantic-id.ts';
+export * from './knowledge-graph.ts';
+export * from './knowledge-match.ts';
+export * from './knowledge-type-ids.ts';
+export * from './knowledge.ts';
+export * from './concept-knowledge.ts';
+export * from './point-knowledge.ts';
+export * from './point-navigation.ts';
+export * from './owned-knowledge.ts';
+export * from './published-knowledge.ts';
+export * from './programmed-knowledge.ts';
+export * from './retrieval.ts';
+export * from './runners.ts';
+export * from './domain-summary.ts';
+export * from './info-receipt.ts';
+export * from './navigation-receipt.ts';
+export * from './dari-tools.ts';
+export * from './report-extract.ts';
+export * from './report-archive.ts';
+export * from './move-entry.ts';
+export * from './remove-file.ts';
