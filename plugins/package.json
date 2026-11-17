@@ -1,0 +1,13 @@
+{
+ "name": "@hh9527/dari-plugins",
+ "private": true,
+ "type": "module",
+ "scripts": {
+  "build": "pnpm -r run build && node pack.mjs",
+  "typecheck": "pnpm -r run typecheck"
+ },
+ "devDependencies": {
+  "typescript": "^7.0.2",
+  "tsdown": "^0.23.0"
+ }
+}

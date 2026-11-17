@@ -1,0 +1,11 @@
+# 插件是独立的安装单元：dari 引擎的 npm install 不包含这里。
+packages:
+  - dsh-dari
+  - dsh-dari-client
+
+catalog:
+  typescript: ^7.0.2
+  tsdown: ^0.23.0
+  "@types/node": ^26.6.4
+  "@js-temporal/polyfill": ^0.5.1
+  echarts: ^6.1.0
