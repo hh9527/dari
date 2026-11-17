@@ -15,22 +15,19 @@
             name: "@deepseek-ai/dsh-tool-fs"
           - id: tool-fs-search
             name: "@deepseek-ai/dsh-tool-fs-search"
+            # 宿主校验要求该值显式给出，插件默认值不足以通过。
             config:
               sampleOverCapGlobResults: false
-          - id: persona
-            name: "@deepseek-ai/dsh-persona"
-            config:
-              includeRuntimeContext: false
-              prefix: ''
+          # 澄清通道：工作流派生问题时必须能结构化提问。
           - id: tool-ask-user
             name: "@deepseek-ai/dsh-tool-ask-user"
+          # 工作流入门技能：插件注册 dari-work 时依赖它。
           - id: tool-skill
             name: "@deepseek-ai/dsh-tool-skill"
-          - id: present
-            name: "@deepseek-ai/dsh-tool-present"
           - id: dari
             name: "@local/dsh-plugin-dari"
             config: {}
+          # 长会话必须压缩上下文：整卷跑下来会到 300k 量级。
           - id: compaction
             name: cordis:group
             group: true
@@ -45,7 +42,6 @@
               - id: tool-result-pruner
                 name: "@deepseek-ai/dsh-compaction-tool-result-pruner"
                 config:
-                  # 阈值管"小于这个数就别动它"：64K 之下原样进上下文；head/tail 只服务更大的输出。
                   thresholdChars: 65536
                   headChars: 4096
                   tailChars: 1024
