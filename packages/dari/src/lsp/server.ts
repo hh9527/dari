@@ -46,9 +46,11 @@ function typeOf(doc:Document,name:string,at:number):Type|undefined {
 export class LanguageServer {
  readonly documents=new Map<string,Document>();
  shutdown=false;
- readonly integration:Integration;
+ private integrationRef:Integration;
+ get integration():Integration{return this.integrationRef;}
+ setIntegration(next:Integration){this.integrationRef=next;}
  readonly notify:(method:string,params:unknown)=>void;
- constructor(integration:Integration={},notify:(method:string,params:unknown)=>void=()=>{}){this.integration=integration;this.notify=notify;}
+ constructor(integration:Integration={},notify:(method:string,params:unknown)=>void=()=>{}){this.integrationRef=integration;this.notify=notify;}
  private analyze(doc:Document){
   if(Buffer.byteLength(doc.text)>262144){this.notify('textDocument/publishDiagnostics',{uri:doc.uri,version:doc.version,diagnostics:[{range:rangeAt(doc.text,0,1),severity:1,source:'dari',message:'Document exceeds 256 KiB'}]});return;}
   const result=analyze(doc.text,this.integration.checker,this.integration.options);doc.program=result.program;doc.entries=entries(doc.text);
