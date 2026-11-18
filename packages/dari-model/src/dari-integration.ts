@@ -1,6 +1,6 @@
 import {DatabaseSync} from 'node:sqlite';
-import {registerCalendarFunctions} from '@hh9527/dari-core';
-import type {ModelCheckPort,ModelExecutionPort,Type} from '@hh9527/dari-core';
+import {registerCalendarFunctions} from '@local/dari-core';
+import type {ModelCheckPort,ModelExecutionPort,Type} from '@local/dari-core';
 import {openModel} from './telora-model.ts';
 import {dariHost} from './dari-host.ts';
 import {infoContracts} from './dari-info-contract.ts';

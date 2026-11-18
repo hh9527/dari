@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { createRunner } from '@hh9527/dari-model';
-import { readBuildInformation } from '@hh9527/dari-model';
-import { collectProgrammedKnowledge } from '@hh9527/dari-model';
-import { derivePublishedKnowledge } from '@hh9527/dari-model';
-import { resolveFact } from '@hh9527/dari-model';
-import type { Settings } from '@hh9527/dari-model';
+import { createRunner } from '@local/dari-model';
+import { readBuildInformation } from '@local/dari-model';
+import { collectProgrammedKnowledge } from '@local/dari-model';
+import { derivePublishedKnowledge } from '@local/dari-model';
+import { resolveFact } from '@local/dari-model';
+import type { Settings } from '@local/dari-model';
 
 const [model,...domains]=process.argv.slice(2);
 assert.ok(model && domains.length, 'Expected model path and one or more domains');

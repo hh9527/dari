@@ -1,5 +1,5 @@
-import {show,type Type} from '@hh9527/dari-core';
-import type {ModelCheckPort} from '@hh9527/dari-core';
+import {show,type Type} from '@local/dari-core';
+import type {ModelCheckPort} from '@local/dari-core';
 
 export type InfoPoint={id:string;kind:string;dataset?:string;dimension?:string;measure?:string;relation?:string;type?:string;variant?:string;datasets?:string[];members?:{id:string;kind:string}[]};
 /** Resolve exact knowledge identities against published contracts, never derive symbols from IDs. */

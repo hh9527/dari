@@ -1,6 +1,6 @@
 import {loadIntegration,argumentsOf} from '../load-integration.ts';
-import {createIntegration} from '@hh9527/dari-model';
-import {loadWorkspaceConfig} from '@hh9527/dari-model';
+import {createIntegration} from '@local/dari-model';
+import {loadWorkspaceConfig} from '@local/dari-model';
 import {serveLsp} from './transport.ts';
 try{
  const {flags}=argumentsOf(process.argv.slice(2));

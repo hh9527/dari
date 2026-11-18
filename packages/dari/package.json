@@ -1,5 +1,5 @@
 {
- "name": "@hh9527/dari",
+ "name": "@local/dari",
  "version": "0.1.0",
  "type": "module",
  "private": true,
@@ -23,7 +23,7 @@
   "typecheck": "tsc -p tsconfig.json --noEmit"
  },
  "devDependencies": {
-  "@hh9527/dari-core": "0.1.0",
-  "@hh9527/dari-model": "0.1.0"
+  "@local/dari-core": "0.1.0",
+  "@local/dari-model": "0.1.0"
  }
 }

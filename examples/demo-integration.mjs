@@ -1,5 +1,5 @@
 import {DatabaseSync} from 'node:sqlite';
-import {createFixtureModel} from '@hh9527/dari-core/testing';
+import {createFixtureModel} from '@local/dari-core/testing';
 export function createIntegration(options){
  let database;
  const {model}=createFixtureModel({query(sql,parameters){

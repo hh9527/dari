@@ -1,5 +1,5 @@
-import {analyze,show,type Program,type Type, type CheckOptions} from '@hh9527/dari-core';
-import {builtinTypes,contextSelectors,builtinComponents,commonAttributes,tokenize,Fault,type Token} from '@hh9527/dari-core';
+import {analyze,show,type Program,type Type, type CheckOptions} from '@local/dari-core';
+import {builtinTypes,contextSelectors,builtinComponents,commonAttributes,tokenize,Fault,type Token} from '@local/dari-core';
 import type {Integration} from '../integration.ts';
 import {offsetAt,positionAt,rangeAt,type Position} from './protocol.ts';
 

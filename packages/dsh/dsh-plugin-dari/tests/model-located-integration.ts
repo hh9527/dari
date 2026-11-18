@@ -1,8 +1,8 @@
 // Run explicitly: node tests/model-located-integration.ts /path/to/ic-dari.wasm
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {analyze,check,canonicalIntent,ModelCheckFailure,SourceOffsets,MODEL_ABI_VERSION} from '@hh9527/dari-core';
-import {openModel} from '@hh9527/dari-model';
+import {analyze,check,canonicalIntent,ModelCheckFailure,SourceOffsets,MODEL_ABI_VERSION} from '@local/dari-core';
+import {openModel} from '@local/dari-model';
 import {TeloraWasm} from '../src/telora-wasm.mjs';
 import {encodeLocatedInput} from '../src/located-input.mjs';
 const artifact=process.argv[2];assert(artifact,'pass an IC DARI model artifact');

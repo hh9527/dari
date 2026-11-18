@@ -1,5 +1,5 @@
 import type {DatabaseSync} from 'node:sqlite';
-import type {DatabasePort} from '@hh9527/dari-core';
+import type {DatabasePort} from '@local/dari-core';
 const quote=(s:string)=>'"'+s.replaceAll('"','""')+'"';
 /** Local workspace adapter; the caller owns the writable SQLite connection. */
 export function sqlite(db:DatabaseSync):DatabasePort {

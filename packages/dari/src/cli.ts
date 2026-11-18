@@ -1,10 +1,10 @@
 import {readFileSync,mkdirSync,writeFileSync} from 'node:fs';
 import {resolve as pathResolve,join} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
-import {check,show} from '@hh9527/dari-core';
-import {resolve} from '@hh9527/dari-core';
+import {check,show} from '@local/dari-core';
+import {resolve} from '@local/dari-core';
 import {sqlite} from './adapters/sqlite.ts';
-import {renderDiagnostics} from '@hh9527/dari-core';
+import {renderDiagnostics} from '@local/dari-core';
 import {loadIntegration,argumentsOf} from './load-integration.ts';
 import type {Integration} from './integration.ts';
 let integration:Integration={};

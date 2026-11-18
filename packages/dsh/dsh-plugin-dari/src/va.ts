@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { singleFlight } from '@hh9527/dari-model';
-import type { AgentLike, ContentBlock, LogFn, PluginContext, RenderBlock, SubagentActivation } from '@hh9527/dari-model';
-import type { PluginConfig, Settings } from '@hh9527/dari-model';
+import { singleFlight } from '@local/dari-model';
+import type { AgentLike, ContentBlock, LogFn, PluginContext, RenderBlock, SubagentActivation } from '@local/dari-model';
+import type { PluginConfig, Settings } from '@local/dari-model';
 
 // 仅在咨询存续期间传递已解析配置，不写入工作区或暴露给模型。
 export const VA_SETTINGS = new Map<string, Settings>();

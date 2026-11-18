@@ -1,16 +1,16 @@
-import {semanticId} from '@hh9527/dari-model';
-import {ENABLE_KNOWLEDGE_SEARCH} from '@hh9527/dari-model';
-import {discoverConcepts,renderConcepts} from '@hh9527/dari-model';
-import {renderInfo} from '@hh9527/dari-model';
-import {renderSearch,renderRoutes} from '@hh9527/dari-model';
-import {searchPoints,routePoints} from '@hh9527/dari-model';
-import { readPoints } from '@hh9527/dari-model';
-import { isRecord, type ToolDefinition, type ToolExec } from '@hh9527/dari-model';
-import type { Knowledge } from '@hh9527/dari-model';
-import {readWindow} from '@hh9527/dari-model';
+import {semanticId} from '@local/dari-model';
+import {ENABLE_KNOWLEDGE_SEARCH} from '@local/dari-model';
+import {discoverConcepts,renderConcepts} from '@local/dari-model';
+import {renderInfo} from '@local/dari-model';
+import {renderSearch,renderRoutes} from '@local/dari-model';
+import {searchPoints,routePoints} from '@local/dari-model';
+import { readPoints } from '@local/dari-model';
+import { isRecord, type ToolDefinition, type ToolExec } from '@local/dari-model';
+import type { Knowledge } from '@local/dari-model';
+import {readWindow} from '@local/dari-model';
 const readTextLines=(text:string,rel:string,offset:unknown,limit:unknown,_tool:string)=>readWindow([text],rel,offset,limit);
 import { helpFiles, helpEntries } from './help-files.ts';
-import { OBJECT_OUTPUT, renderWorkRead } from '@hh9527/dari-model';
+import { OBJECT_OUTPUT, renderWorkRead } from '@local/dari-model';
 
 /** Agent surface: fixed knowledge queries; typed relation expressions stay in data analysis drafts. */
 export function guidedTools(definitions: ToolDefinition[], knowledge: Knowledge, infoContracts?: (points:any[],exec:ToolExec)=>Promise<Record<string,unknown>>): ToolDefinition[] {

@@ -1,5 +1,5 @@
 import {CHART_ROW_ID} from './chart/shared.ts';
-import type {ComponentContract} from '@hh9527/dari-core';
+import type {ComponentContract} from '@local/dari-core';
 import {temporal,timeSemantic,formatTime,embeddedTimeZone,validateTimeFormat,type TimeFormat} from './time-display.ts';
 import {formatValue,precision,type Type} from './display-values.ts';
 import {COMPONENT_KINDS,componentSpec} from './chart/components.ts';

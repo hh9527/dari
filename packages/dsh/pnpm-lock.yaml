@@ -35,10 +35,10 @@ importers:
 
   dsh-plugin-dari:
     dependencies:
-      '@hh9527/dari-core':
+      '@local/dari-core':
         specifier: link:../../../packages/dari-core
         version: link:../../dari-core
-      '@hh9527/dari-model':
+      '@local/dari-model':
         specifier: link:../../../packages/dari-model
         version: link:../../dari-model
       '@js-temporal/polyfill':

@@ -1,5 +1,5 @@
 {
- "name": "@hh9527/dari-plugins",
+ "name": "@local/dari-plugins",
  "private": true,
  "type": "module",
  "scripts": {

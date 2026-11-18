@@ -1,10 +1,10 @@
 import {createInterface} from 'node:readline';
 import {createHash} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
-import {check,show,type Program} from '@hh9527/dari-core';
-import {resolve} from '@hh9527/dari-core';
+import {check,show,type Program} from '@local/dari-core';
+import {resolve} from '@local/dari-core';
 import {sqlite} from './adapters/sqlite.ts';
-import {renderDiagnostics} from '@hh9527/dari-core';
+import {renderDiagnostics} from '@local/dari-core';
 import {loadIntegration,argumentsOf} from './load-integration.ts';
 const lines=createInterface({input:process.stdin,crlfDelay:Infinity});
 const requests=lines[Symbol.asyncIterator]();

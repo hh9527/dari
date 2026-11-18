@@ -1,21 +1,21 @@
 // Workspace-scoped ontology: domain summary, fixed knowledge cards and DARI analysis.
 // Vocabulary assistance and standalone help manuals complement model facts.
 
-export { createProjector } from '@hh9527/dari-model';
-export type { JsonValue, ProjectRule, Projector } from '@hh9527/dari-model';
-export { buildOption, CHART_WIDTH, plotHeight } from '@hh9527/dari-model';
-export { renderEchartsSvg } from '@hh9527/dari-model';
-export { renderMarkdown } from '@hh9527/dari-model';
+export { createProjector } from '@local/dari-model';
+export type { JsonValue, ProjectRule, Projector } from '@local/dari-model';
+export { buildOption, CHART_WIDTH, plotHeight } from '@local/dari-model';
+export { renderEchartsSvg } from '@local/dari-model';
+export { renderMarkdown } from '@local/dari-model';
 
-import { createKnowledge } from '@hh9527/dari-model';
+import { createKnowledge } from '@local/dari-model';
 import { installWorkMethods } from './work-methods.ts';
-import { createTimeContext } from '@hh9527/dari-model';
+import { createTimeContext } from '@local/dari-model';
 import { guidedTools } from './guided-tools.ts';
 import { createTools } from './tools.ts';
 import { createVaRuntime } from './va.ts';
 import { installVocabularyHelper } from './va-helper.ts';
-import type { LogFn, PluginContext } from '@hh9527/dari-model';
-import type { PluginConfig } from '@hh9527/dari-model';
+import type { LogFn, PluginContext } from '@local/dari-model';
+import type { PluginConfig } from '@local/dari-model';
 
 export const inject = ['tools', 'systemPrompt'];
 
@@ -54,6 +54,6 @@ export function apply(ctx: PluginContext, config: PluginConfig = {}): void {
 }
 
 // Finite host capabilities consumed by the isolated DARI service.
-export {dariHost} from '@hh9527/dari-model';
+export {dariHost} from '@local/dari-model';
 
-export {createIntegration} from '@hh9527/dari-model';
+export {createIntegration} from '@local/dari-model';

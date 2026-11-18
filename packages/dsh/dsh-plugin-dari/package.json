@@ -41,8 +41,8 @@
     "typescript": "catalog:"
   },
   "dependencies": {
-    "@hh9527/dari-core": "link:../../../packages/dari-core",
-    "@hh9527/dari-model": "link:../../../packages/dari-model",
+    "@local/dari-core": "link:../../../packages/dari-core",
+    "@local/dari-model": "link:../../../packages/dari-model",
     "@js-temporal/polyfill": "catalog:",
     "echarts": "catalog:"
   }

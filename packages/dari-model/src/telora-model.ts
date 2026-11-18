@@ -1,13 +1,13 @@
-import {modelErrorText,ModelCheckFailure,type InputOrigin} from '@hh9527/dari-core';
-import {sharedTypes} from '@hh9527/dari-core';
+import {modelErrorText,ModelCheckFailure,type InputOrigin} from '@local/dari-core';
+import {sharedTypes} from '@local/dari-core';
 import {Worker} from 'node:worker_threads';
 import {accessSync,readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {resolve as pathResolve} from 'node:path';
-import type {ModelCheckPort,IntentType,MemberSymbol,DatasetSymbol,RelationSymbol,ResultColumn,ValueCodec} from '@hh9527/dari-core';
-import {MODEL_ABI_VERSION,type EncodedIntent,type ProofReceipt} from '@hh9527/dari-core';
-import type {Type} from '@hh9527/dari-core';
-import {primaryCodecs} from '@hh9527/dari-core/codecs';
+import type {ModelCheckPort,IntentType,MemberSymbol,DatasetSymbol,RelationSymbol,ResultColumn,ValueCodec} from '@local/dari-core';
+import {MODEL_ABI_VERSION,type EncodedIntent,type ProofReceipt} from '@local/dari-core';
+import type {Type} from '@local/dari-core';
+import {primaryCodecs} from '@local/dari-core/codecs';
 
 type WireMember={id:string;symbol:string;kind:'dimension'|'measure';logical:string;storage:string;nullable:boolean};
 type WireDataset={id:string;symbol:string;members:WireMember[]};

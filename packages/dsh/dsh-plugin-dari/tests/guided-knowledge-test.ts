@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import { domainSummary, renderDomainSummary, DOMAIN_SUMMARY_URI } from '@hh9527/dari-model';
+import { domainSummary, renderDomainSummary, DOMAIN_SUMMARY_URI } from '@local/dari-model';
 import { guidedTools } from '../src/guided-tools.ts';
-import type { Knowledge, WorkspaceEntry } from '@hh9527/dari-model';
-import type { ToolDefinition } from '@hh9527/dari-model';
+import type { Knowledge, WorkspaceEntry } from '@local/dari-model';
+import type { ToolDefinition } from '@local/dari-model';
 
 const graph = {entities:{e:{identity:'types/Id',referenced_by:{datasets:['datasets/d']}}},datasets:{d:{grain:['id'],clock:'ts',dimensions:{id:{type:'Int',referenced_by:['x']}},measures:{n:{unit:'count'}},referenced_by:['x']}},relations:{r:{from_dataset:'datasets/d',to_dataset:'datasets/d',cardinality:{from:'Many',to:'One'},key:{from:'id',to:'id'},guard:null,referenced_by:['x']}},types:{Id:{values:{secret:{}}}},items:[{key:'datasets/d',doc:'Data',names:['Dataset label','vocabulary-secret']}],tools:{pluginSecret:{}}};
 const original = JSON.stringify(graph);

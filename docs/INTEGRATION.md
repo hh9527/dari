@@ -3,7 +3,7 @@
 `dari-core` 定义类型与证明规则；`dari` 组合 CLI、服务和编辑器。集成模块导出 `createIntegration(options)`，可以异步加载模型契约，然后返回检查与执行时使用的端口。
 
 ```ts
-import type {Integration} from '@hh9527/dari';
+import type {Integration} from '@local/dari';
 export async function createIntegration(options): Promise<Integration> {
     return {
         checker,  // ModelCheckPort
@@ -28,7 +28,7 @@ export async function createIntegration(options): Promise<Integration> {
 
 ## 数据库
 
-`DatabasePort` 由连接所有者提供 `query(sql, parameters)` 和 `registerFunction(...)`，当前 dialect 为 sqlite。核心生成本地 SQL DAG，不导入 node:sqlite。端口还提供 materialize(name, columns, rows) 与 drop(name)，用于原子导入、清理独立临时表。列类型由已检查 Schema 决定；适配器不能根据样本推断结构。可使用 `@hh9527/dari/sqlite` 的非拥有型适配器包装 DatabaseSync，连接创建、权限、事务与关闭均由调用方负责。
+`DatabasePort` 由连接所有者提供 `query(sql, parameters)` 和 `registerFunction(...)`，当前 dialect 为 sqlite。核心生成本地 SQL DAG，不导入 node:sqlite。端口还提供 materialize(name, columns, rows) 与 drop(name)，用于原子导入、清理独立临时表。列类型由已检查 Schema 决定；适配器不能根据样本推断结构。可使用 `@local/dari/sqlite` 的非拥有型适配器包装 DatabaseSync，连接创建、权限、事务与关闭均由调用方负责。
 
 CLI/service 每次执行创建独立的内存 SQLite 工作库。`--database` 为可信 integration 提供 options.database，不作为本地工作库；纯本地程序无需该参数。集成模块按需打开业务数据库，检查与 LSP 不读取业务行。
 

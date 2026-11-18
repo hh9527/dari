@@ -6,8 +6,8 @@
 
 | 包 | 职责 |
 | --- | --- |
-| `@hh9527/dari-core` | 解析、名称绑定、类型检查、SQL DAG、执行、共享语义及模型/数据库/展现端口 |
-| `@hh9527/dari` | CLI、JSONL 服务、LSP、可信集成模块加载及 SQLite 适配器 |
+| `@local/dari-core` | 解析、名称绑定、类型检查、SQL DAG、执行、共享语义及模型/数据库/展现端口 |
+| `@local/dari` | CLI、JSONL 服务、LSP、可信集成模块加载及 SQLite 适配器 |
 
 核心不依赖 DSH、Telora、业务模型或具体数据库驱动。本地后处理固定使用 SQLite；远端执行由集成适配器负责，数据库和方言独立。远端结果仅在被本地 query! 消费时导入工作库，直接展示不导入。
 
@@ -52,7 +52,7 @@ node scripts/package-runtime.mjs /path/to/new-runtime-directory
 运行包包含两个包的编译结果和启动入口，无需访问当前源码工作区或安装生产依赖。运行服务：
 
 ```sh
-node /path/to/runtime/node_modules/@hh9527/dari/dist/service.js \
+node /path/to/runtime/node_modules/@local/dari/dist/service.js \
   --integration /path/to/integration.mjs --options '{...}' \
   --database /path/to/database.sqlite
 ```

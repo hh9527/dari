@@ -14,6 +14,6 @@ export default defineConfig({
   hash: false,
   unbundle: false,
   outExtensions: () => ({ js: '.mjs' }),
-  deps: { alwaysBundle: [/^@hh9527\/dari/, /^echarts/, /^zrender/, /^tslib$/, /^@js-temporal\//, /^jsbi$/] },
+  deps: { alwaysBundle: [/^@local\/dari/, /^echarts/, /^zrender/, /^tslib$/, /^@js-temporal\//, /^jsbi$/] },
   loader: { '.md': 'text' },
 });

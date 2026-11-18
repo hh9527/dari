@@ -1,4 +1,4 @@
-import {ENABLE_KNOWLEDGE_SEARCH} from '@hh9527/dari-model';
+import {ENABLE_KNOWLEDGE_SEARCH} from '@local/dari-model';
 import search from './help/search.md';
 import workflow from './help/workflow.md';
 import dari from './help/dari.md';

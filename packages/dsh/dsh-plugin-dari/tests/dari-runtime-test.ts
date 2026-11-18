@@ -18,7 +18,7 @@ try{
  writeFileSync(integration,'import {dariHost} from "./plugin/lib/index.mjs";export function createIntegration(){return {options:{host:dariHost}};}');
  const database=join(root,'test.sqlite');new DatabaseSync(database).close();
  const source='data rows=table([{name:"A",n:1},{name:"B",n:2}]);data top=query! {let a=from(rows);let output=a |> project({name:a.name,n:a.n});output |> order_by(desc(output.n)) |> take(1)};answer tree! {Answer [BarChart(data=top,spec={category:$.name,value:$.n})]};';
- const service=join(plugin,'dari-runtime/node_modules/@hh9527/dari/dist/service.js');
+ const service=join(plugin,'dari-runtime/node_modules/@local/dari/dist/service.js');
  const child=spawn(process.execPath,[service,'--integration',integration,'--database',database],{cwd:root});
  let output='',errors='';child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>errors+=b);
  const timer=setTimeout(()=>child.kill('SIGKILL'),30000);
