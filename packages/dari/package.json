@@ -1,9 +1,31 @@
 {
- "name":"@hh9527/dari","version":"0.1.0","type":"module","private":true,
- "description":"DARI CLI, JSONL service, LSP and database adapters",
- "engines":{"node":">=24"},
- "exports":{".":"./dist/index.js","./sqlite":"./dist/adapters/sqlite.js","./lsp":"./dist/lsp/server.js"},
- "bin":{"dari":"./bin/dari.mjs","dari-lsp":"./bin/dari-lsp.mjs"},"files":["dist","bin"],
- "dependencies":{"@hh9527/dari-core":"0.1.0"},
- "scripts":{"build":"tsc -p tsconfig.json","typecheck":"tsc -p tsconfig.json --noEmit"}
+ "name": "@hh9527/dari",
+ "version": "0.1.0",
+ "type": "module",
+ "private": true,
+ "description": "DARI CLI, JSONL service, LSP and database adapters",
+ "engines": {
+  "node": ">=24"
+ },
+ "exports": {
+  ".": "./dist/index.js",
+  "./sqlite": "./dist/adapters/sqlite.js",
+  "./lsp": "./dist/lsp/server.js"
+ },
+ "bin": {
+  "dari": "./bin/dari.mjs",
+  "dari-lsp": "./bin/dari-lsp.mjs"
+ },
+ "files": [
+  "dist",
+  "bin"
+ ],
+ "dependencies": {
+  "@hh9527/dari-core": "0.1.0",
+  "@hh9527/dari-model": "0.1.0"
+ },
+ "scripts": {
+  "build": "tsc -p tsconfig.json",
+  "typecheck": "tsc -p tsconfig.json --noEmit"
+ }
 }

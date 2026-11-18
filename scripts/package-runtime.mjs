@@ -4,7 +4,7 @@ import {fileURLToPath} from 'node:url';
 const root=fileURLToPath(new URL('..',import.meta.url));
 const output=process.argv[2];if(!output)throw Error('Usage: node scripts/package-runtime.mjs output-directory');
 const target=resolve(output);if(existsSync(target))throw Error('Output directory already exists: '+target);
-for(const name of ['dari-core','dari']){
+for(const name of ['dari-core','dari-model','dari']){
  const from=join(root,'packages',name),to=join(target,'node_modules/@hh9527',name);
  if(!existsSync(join(from,'dist/index.js')))throw Error('Build workspace before packaging');
  mkdirSync(to,{recursive:true});cpSync(join(from,'dist'),join(to,'dist'),{recursive:true});

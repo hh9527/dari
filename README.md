@@ -34,7 +34,7 @@ DARI 文件不能加载模块或执行任意 JavaScript；integration 是由启�
 ## 编辑器
 
 ```sh
-node packages/dari/bin/dari-lsp.mjs
+node packages/dari/bin/dari-lsp.mjs --workspace /path/to/workspace
 node packages/dari/bin/dari-lsp.mjs --integration /path/to/integration.mjs --options '{...}'
 ```
 
