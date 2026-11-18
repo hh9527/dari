@@ -12,7 +12,9 @@ export async function serveLsp(input:Readable,output:Writable,source:Integration
  let rootUri:string|undefined,server:LanguageServer|undefined;
  // 工作区来自编辑器给的文件/根，而不是进程 cwd；文件一打开就按它解析一次。
  const ensure=async(context:IntegrationContext)=>{
-  if(factory)integration=await factory(context);
+  // 只有 initialize 和 didOpen 能确定工作区；didChange/hover 等沿用当前 integration，
+  // 否则工厂会被用空上下文调用，把已加载的模型丢掉。
+  if(factory&&(!server||context.fileUri!==undefined))integration=await factory(context);
   if(!server)server=new LanguageServer(integration,(method,params)=>send({jsonrpc:'2.0',method,params}));
   else server.setIntegration(integration);
  };
