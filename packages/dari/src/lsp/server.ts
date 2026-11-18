@@ -2,6 +2,7 @@ import {analyze,show,type Program,type Type, type CheckOptions} from '@local/dar
 import {builtinTypes,contextSelectors,builtinComponents,commonAttributes,tokenize,Fault,type Token} from '@local/dari-core';
 import type {Integration} from '../integration.ts';
 import {offsetAt,positionAt,rangeAt,type Position} from './protocol.ts';
+import {formatType,renderDataHover,renderHover,renderTypeHover,trimText,type HoverContent} from './hover.ts';
 
 type Entry={name:string;at:number;end:number;visible:number;scope:number;scopeEnd:number;kind:string};
 type Document={uri:string;text:string;version:number;program?:Program;entries:Entry[]};
@@ -74,15 +75,17 @@ export class LanguageServer {
   if(method==='textDocument/completion')return this.complete(doc,at);
   if(method==='textDocument/hover'){
    const word=wordAt(doc.text,at);
+   const range=rangeAt(doc.text,word.start,word.end-word.start);
+   const reply=(content:HoverContent)=>({contents:renderHover(content),range});
    for(const node of doc.program?.treeNodes??[]){
     if(node.at===word.start&&node.name===word.name&&node.contract){
      const c=node.contract,attrs={...c.attributes,...commonAttributes};
-     const signature=node.name+'('+Object.entries(c.attributes).map(([key,a])=>key+(a.required?'':'?')+': '+a.type).join(', ')+')'+(c.children?' [content]':'');
-     const details=Object.entries(attrs).map(([key,a])=>'- `'+key+'`: '+a.description+(a.required?'（必填）':'（可选）')).join('\n');
-     return {contents:{kind:'markdown',value:'```dari\n'+signature+'\n```\n'+c.description+'\n\n'+details},range:rangeAt(doc.text,word.start,word.end-word.start)};
+     const signature=node.name+'('+Object.entries(c.attributes).map(([key,a])=>key+(a.required?'':'?')).join(', ')+')';
+     const details=Object.entries(attrs).map(([key,a])=>'`'+key+'`'+(a.required?'（必填）':'（可选）')+'：`'+a.type+'` — '+trimText(a.description));
+     return reply({signature,description:c.description,details});
     }
     const attr=node.attributes.find(a=>a.at===word.start&&a.name===word.name),contract=attr&&(node.contract?.attributes[attr.name]??commonAttributes[attr.name]);
-    if(attr&&contract)return {contents:{kind:'markdown',value:'```dari\n'+node.name+'.'+attr.name+': '+(attr.type?show(attr.type):contract.type)+'\n```\n'+(contract.required?'必填':'可选')+' · '+contract.description},range:rangeAt(doc.text,word.start,word.end-word.start)};
+    if(attr&&contract)return reply({signature:node.name+'.'+attr.name,type:formatType(attr.type??contract.type),description:(contract.required?'必填 · ':'可选 · ')+trimText(contract.description)});
    }
    const ref=doc.program?.references.find(r=>r.at<=word.start&&r.at+(r.path.join('.').length)>=word.end);
    const type=ref?(word.start===ref.at?ref.rootType:ref.type):typeOf(doc,word.name,at);
@@ -90,15 +93,15 @@ export class LanguageServer {
    const types=new Map([...Object.entries(builtinTypes),...Object.entries(this.integration.options?.host?.types??{}),...Object.entries(model?.types??{}),...doc.program?.types??[]]);
    const published=types.get(word.name),split=word.name.lastIndexOf('::'),enumName=word.name.slice(0,split),member=word.name.slice(split+2),enumType=split>=0?types.get(enumName):undefined;
    const context=Object.hasOwn(contextSelectors,word.name)?contextSelectors[word.name]:undefined;
-   const info=context?word.name+': '+show(context.type)+'\n\n'+context.description
-    :!type&&word.name==='Context'?'Context：context! 的上下文选择器命名空间\n\n'+Object.entries(contextSelectors).map(([name,c])=>name+': '+show(c.type)+' — '+c.description).join('\n')
-    :!type&&enumType?.codec?.variants?.includes(member)?word.name+': '+show(enumType)
-    :!type&&published?.codec?.variants?'enum '+word.name+' { '+published.codec.variants.join(', ')+' }'
-    :!type&&published?'type '+word.name+(published.inner?' = struct('+show(published.inner)+')':published.fields?' { '+Object.entries(published.fields).map(([key,t])=>key+': '+show(t)).join(', ')+' }':'')
-    :!type&&Object.hasOwn(typeConstructors,word.name)?typeConstructors[word.name]:undefined;
-   if(info)return {contents:{kind:'markdown',value:'```dari\n'+info+'\n```'},range:rangeAt(doc.text,word.start,word.end-word.start)};
-   const text=type?word.name+': '+show(type):published?show(published):dataset?'Dataset '+dataset.symbol+'\n'+Object.entries(dataset.members).map(([name,m])=>name+': '+show(m.type)).join('\n'):undefined;
-   return text?{contents:{kind:'markdown',value:'```dari\n'+text+'\n```'},range:rangeAt(doc.text,word.start,word.end-word.start)}:null;
+   if(context)return reply({signature:word.name,type:formatType(context.type),description:context.description});
+   if(!type&&word.name==='Context')return reply({signature:'Context',description:'context! 的上下文选择器命名空间',details:Object.entries(contextSelectors).map(([name,c])=>'`Context::'+name+'`：`'+formatType(c.type)+'` — '+trimText(c.description))});
+   if(!type&&enumType?.codec?.variants?.includes(member))return {contents:renderTypeHover(word.name,formatType(enumType)),range};
+   if(!type&&published?.codec?.variants)return {contents:renderTypeHover(word.name,published.inner?formatType(published.inner):'String',['取值：'+published.codec.variants.join('、')]),range};
+   if(type)return {contents:renderDataHover(word.name,formatType(type)),range};
+   if(published)return {contents:renderTypeHover(word.name,formatType(published.fields?published:published.inner??published)),range};
+   if(!type&&Object.hasOwn(typeConstructors,word.name))return reply({signature:word.name,description:typeConstructors[word.name]});
+   if(dataset)return reply({signature:'Dataset '+dataset.symbol,details:Object.entries(dataset.members).map(([name,m])=>'`'+name+'`：`'+formatType(m.type)+'`')});
+   return null;
   }
   if(method==='textDocument/definition'){
    const word=wordAt(doc.text,at),ref=doc.program?.references.find(r=>r.at<=word.start&&r.at+r.path.join('.').length>=word.end);

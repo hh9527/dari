@@ -41,7 +41,7 @@ for(const [name,offset,pattern] of [
  ['a',local.indexOf('a.name'),/name: String/]
 ] as const){const hover=ask('hover',local,offset);assert(hover,`${name} hover missing at ${offset}`);assert.match(hover.contents.value,pattern);}
 const block='data x=do {let n=1;let m=n+1;m};answer tree! {Answer [UseValue(ref=x)]};';
-assert.match(ask('hover',block,block.indexOf('n=1')).contents.value,/n: Int/);
+assert.match(ask('hover',block,block.indexOf('n=1')).contents.value,/data n: Int/);
 const shadow='data input=table([{id:1}]);data rows=query! {let r=from(input);let r=r |> project({label:"A"});r |> order_by(asc(r.label)) |> take(1)};answer tree! {Answer []};';
 assert.match(ask('hover',shadow,shadow.indexOf('r=from')).contents.value,/id: Int/);
 assert.match(ask('hover',shadow,shadow.indexOf('r=r')).contents.value,/label: String/);
@@ -58,7 +58,7 @@ assert.match((remoteServer.handle('textDocument/hover',{textDocument:{uri},posit
 // Tree node and attribute names carry their component contract, not lexical names.
 const tree='data rows=table([{name:"A",n:1}]);data value=42;report report=tree! {Report(title="Summary") [p [UseValue(ref=value,precision=1)],Table(data=rows)]};answer tree! {Answer [UseReport(ref=report)]};';
 assert.match(ask('hover',tree,tree.indexOf('Report(title')).contents.value,/Report\(/);
-assert.match(ask('hover',tree,tree.indexOf('Table(data')).contents.value,/data: Table\(Schema\)/);
+assert.match(ask('hover',tree,tree.indexOf('Table(data')).contents.value,/`data`（必填）：`Table\(Schema\)`/);
 assert.match(ask('hover',tree,tree.indexOf('data=rows')).contents.value,/Table\.data: Table\(Schema\(\{name: String, n: Int\}\)\)/);
 assert.match(ask('hover',tree,tree.indexOf('ref=value')).contents.value,/UseValue\.ref: Int/);
 assert.match(ask('hover',tree,tree.indexOf('precision=')).contents.value,/可选.*小数位数/);
@@ -81,15 +81,15 @@ const timeServer=new LanguageServer({options:{host:timeHost,contextType:{kind:'s
 const time='data ctx=context! {now:Context::Now,tz:Context::ClientTz};data unit=TimeUnit::Day;data dates=calendar_period(LocalDate("2026-02-01"),CalendarUnit::Week);answer tree! {Answer []};';
 timeServer.handle('textDocument/didOpen',{textDocument:{uri,text:time,version:1}});
 const timeHover=(word:string,offset=0)=>timeServer.handle('textDocument/hover',{textDocument:{uri},position:positionAt(time,time.indexOf(word)+offset)}) as any;
-assert.match(timeHover('TimeUnit::Day').contents.value,/TimeUnit::Day: TimeUnit/);
-assert.match(timeHover('TimeUnit::Day',10).contents.value,/TimeUnit::Day: TimeUnit/);
-assert.match(timeHover('Context::Now').contents.value,/Context::Now: EpochMillis/);
+assert.match(timeHover('TimeUnit::Day').contents.value,/TimeUnit::Day[\s\S]*type _ = TimeUnit/);
+assert.match(timeHover('TimeUnit::Day',10).contents.value,/TimeUnit::Day[\s\S]*type _ = TimeUnit/);
+assert.match(timeHover('Context::Now').contents.value,/Context::Now.*EpochMillis/);
 assert.match(timeHover('Context::ClientTz').contents.value,/TimeZone/);
-assert.match(timeHover('CalendarUnit::Week').contents.value,/CalendarUnit::Week: CalendarUnit/);
+assert.match(timeHover('CalendarUnit::Week').contents.value,/CalendarUnit::Week[\s\S]*type _ = CalendarUnit/);
 assert.match(timeHover('LocalDate(').contents.value,/type LocalDate/);
 const completions=(timeServer.handle('textDocument/completion',{textDocument:{uri},position:positionAt(time,time.indexOf('TimeUnit::Day'))}) as any).items;
 for(const name of ['TimeUnit','TimeUnit::Day','Context','Context::Now','CalendarUnit::Week','DateStyle::Date','DateOverflow::Clamp'])assert(completions.some((item:any)=>item.label===name),name);
-for(const [word,pattern]of [['TimeUnit',/enum TimeUnit.*Day, Week/],['Context',/Context::Now: EpochMillis/],['DateStyle',/Date, DateTime, Time/],['Weekday',/Monday.*Sunday/],['TimeUnit::Missing',null]] as const){
+for(const [word,pattern]of [['TimeUnit',/type TimeUnit/],['Context',/Context::Now.*EpochMillis/],['DateStyle',/type DateStyle/],['Weekday',/type Weekday/],['TimeUnit::Missing',null]] as const){
  const source='data value='+word+';answer tree! {Answer []};';timeServer.handle('textDocument/didOpen',{textDocument:{uri,text:source,version:2}});const hover=timeServer.handle('textDocument/hover',{textDocument:{uri},position:positionAt(source,source.indexOf(word))}) as any;
  if(pattern)assert.match(hover.contents.value,pattern);else assert.equal(hover,null);
 }
