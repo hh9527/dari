@@ -17,7 +17,7 @@ export function createDariTools(options:{config:PluginConfig['dari'];knowledge:K
   let w=workers.get(workerKey);if(w)return w;
   if(closed)throw Error('DARI tools disposed');
   const c=options.config??{};
-  const child=spawn(process.execPath,[c.service??fileURLToPath(new URL('../dari-runtime/node_modules/@local/dari/dist/service.mjs',import.meta.url)),'--integration',c.integration??fileURLToPath(new URL('./index.mjs',import.meta.url)),'--options',JSON.stringify({model}),'--database',database],{stdio:['pipe','pipe','pipe'],detached:true});
+  const child=spawn(process.execPath,[c.service??fileURLToPath(new URL('../dari-runtime/dist/service.mjs',import.meta.url)),'--integration',c.integration??fileURLToPath(new URL('./index.mjs',import.meta.url)),'--options',JSON.stringify({model}),'--database',database],{stdio:['pipe','pipe','pipe'],detached:true});
   let stderr='',sequence=0;const pending=new Map<number,{resolve:(v:any)=>void;reject:(e:Error)=>void;timer:ReturnType<typeof setTimeout>}>();
   const stop=()=>{if(child.pid)try{process.kill(-child.pid,'SIGTERM');}catch(e){if((e as NodeJS.ErrnoException).code!=='ESRCH')throw e;}};
   const fail=(error:Error)=>{for(const p of pending.values()){clearTimeout(p.timer);p.reject(error);}pending.clear();workers.delete(workerKey);};
