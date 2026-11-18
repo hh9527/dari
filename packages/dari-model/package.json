@@ -8,9 +8,7 @@
   "node": ">=24"
  },
  "exports": {
-  ".": "./dist/index.js",
-  "./config": "./dist/config.js",
-  "./checker-integration": "./dist/checker-integration.js"
+  ".": "./dist/index.js"
  },
  "files": [
   "dist"

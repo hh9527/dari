@@ -10,7 +10,10 @@ import type {Integration} from './integration.ts';
 let integration:Integration={};
 try{
  const {positional:[command,file],flags}=argumentsOf(process.argv.slice(2));
- if(!['check','run'].includes(command)||!file)throw Error('Usage: dari check|run file.dari [--integration module.js] [--options json] [--database file.sqlite] [--inputs json] [--context json] [--context-contract id] [--output directory]');
+ if(command==='lsp')await import('./lsp/stdio.ts');
+ else if(command==='serve')await import('./service.ts');
+ else if(!['check','run'].includes(command)||!file)throw Error('Usage: dari check|run file.dari [--integration module.js] [--options json] [--database file.sqlite] [--inputs json] [--context json] [--context-contract id] [--output directory]\n       dari lsp [--workspace dir] [--options json] [--integration module.js]');
+ else {
  for(const flag of Object.keys(flags))if(!['integration','options','database','inputs','context','context-contract','output'].includes(flag))throw Error('Unknown option --'+flag);
  integration=await loadIntegration(flags.integration,{...(flags.options?JSON.parse(flags.options):{}),...(flags.database?{database:flags.database}:{})});
  const source=readFileSync(file,'utf8'),p=check(source,integration.checker,integration.options);
@@ -22,5 +25,6 @@ try{
    if(flags.output){const dir=pathResolve(flags.output);mkdirSync(dir,{recursive:true});for(const [name,content]of Object.entries(result.artifacts))writeFileSync(join(dir,name),content);writeFileSync(join(dir,'answer.md'),result.answer);writeFileSync(join(dir,'data.md'),result.dataDocument);}
    console.log(result.answer);
   }finally{db.close();}
+ }
  }
 }catch(error){console.error(error instanceof Error?error.message:String(error));process.exitCode=1;}finally{await integration.close?.();}

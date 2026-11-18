@@ -1,6 +1,6 @@
 # 编辑器集成
 
-先构建 workspace，再启动 `packages/dari/bin/dari-lsp.mjs`。标准输出专用于 LSP 帧，日志写入标准错误。
+先构建 workspace，再启动 `dari lsp`（等价入口 `packages/dari/bin/dari-lsp.mjs`）。标准输出专用于 LSP 帧，日志写入标准错误。
 
 Helix 的 languages.toml 示例：
 
