@@ -12,7 +12,6 @@
   "icon": "./icon.svg",
   "files": [
     "lib",
-    "dari-runtime",
     "cordis.patch.yml",
     "icon.svg",
     "locale/*.json"

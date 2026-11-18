@@ -17,7 +17,14 @@ export function createDariTools(options:{config:PluginConfig['dari'];knowledge:K
   let w=workers.get(workerKey);if(w)return w;
   if(closed)throw Error('DARI tools disposed');
   const c=options.config??{};
-  const child=spawn(process.execPath,[c.service??fileURLToPath(new URL('../dari-runtime/dist/service.mjs',import.meta.url)),'--integration',c.integration??fileURLToPath(new URL('./index.mjs',import.meta.url)),'--options',JSON.stringify({model}),'--database',database],{stdio:['pipe','pipe','pipe'],detached:true});
+  // 默认把宿主插件自身作为 service 入口：同一个 bundle 用 DARI_SERVICE 区分角色。
+  const self=fileURLToPath(new URL('./index.mjs',import.meta.url));
+  const service=c.service??self;
+  const args=c.service
+   ?[service,'--integration',c.integration??self,'--options',JSON.stringify({model}),'--database',database]
+   :[service,'--options',JSON.stringify({model}),'--database',database];
+  const env=c.service?process.env:{...process.env,DARI_SERVICE:'1'};
+  const child=spawn(process.execPath,args,{stdio:['pipe','pipe','pipe'],detached:true,env});
   let stderr='',sequence=0;const pending=new Map<number,{resolve:(v:any)=>void;reject:(e:Error)=>void;timer:ReturnType<typeof setTimeout>}>();
   const stop=()=>{if(child.pid)try{process.kill(-child.pid,'SIGTERM');}catch(e){if((e as NodeJS.ErrnoException).code!=='ESRCH')throw e;}};
   const fail=(error:Error)=>{for(const p of pending.values()){clearTimeout(p.timer);p.reject(error);}pending.clear();workers.delete(workerKey);};

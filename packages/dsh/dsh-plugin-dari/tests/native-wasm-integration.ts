@@ -12,7 +12,7 @@ for(const path of process.argv.slice(2)){
  assert.equal(divide(5).ok,20);
  for(let i=0;i<30;i++)assert.equal(divide(10).ok,10);
  const response=runtime.request(encodeLocatedInput({method:'test',input:{method:'divide',input:'bad'}},[{path:['input','input'],span:{start:3,end:12}}]));
- assert(response.error);assert(response.diagnostics.some(d=>d.locs?.some(l=>l.source==='<input>'&&l.start.offset===3&&l.end.offset===12)));
+ assert(response.error);assert(response.diagnostics.some(d=>d.locs?.some((l:any)=>l.source==='<input>'&&l.start.offset===3&&l.end.offset===12)));
  assert.equal(divide(2).ok,50);
 }
 console.log('Native Wasm: plain initialization, baked snapshots, repeated resets, actual trap recovery and codec source spans passed');

@@ -1,11 +1,8 @@
-import {copyFileSync,rmSync,writeFileSync} from 'node:fs';
-import {execFileSync} from 'node:child_process';
+import {copyFileSync,existsSync,rmSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
+// 插件运行时自足：主入口是 lib/index.mjs，worker 从 dari 的构建产物拷进同一个 lib。
 const root=new URL('../../../../',import.meta.url);
-const engine=new URL('./',root);
-const runtime=new URL('dist/dsh-plugin-dari/dari-runtime/',root);
-for(const name of ['model-worker.mjs','located-input.mjs','telora-wasm.mjs'])copyFileSync(new URL('../../../dari-model/src/'+name,import.meta.url),new URL('dist/dsh-plugin-dari/lib/'+name,root));
-rmSync(runtime,{recursive:true,force:true});
-execFileSync(process.execPath,[fileURLToPath(new URL('scripts/package-runtime.mjs',engine)),fileURLToPath(runtime)],{stdio:'inherit'});
-const commit=execFileSync('git',['rev-parse','HEAD'],{cwd:engine,encoding:'utf8'}).trim();
-writeFileSync(new URL('source.json',runtime),JSON.stringify({repository:'https://github.com/hh9527/dari.git',commit},null,2)+'\n');
+const source=new URL('packages/dari/lib/model-worker.mjs',root);
+if(!existsSync(fileURLToPath(source)))throw Error('先构建 dari');
+copyFileSync(fileURLToPath(source),fileURLToPath(new URL('dist/dsh-plugin-dari/lib/model-worker.mjs',root)));
+rmSync(fileURLToPath(new URL('dist/dsh-plugin-dari/dari-runtime',root)),{recursive:true,force:true});

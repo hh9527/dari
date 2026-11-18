@@ -7,6 +7,8 @@ export { buildOption, CHART_WIDTH, plotHeight } from '@local/dari-model';
 export { renderEchartsSvg } from '@local/dari-model';
 export { renderMarkdown } from '@local/dari-model';
 
+import { runService } from '@local/dari/service';
+import { createIntegration } from '@local/dari-model';
 import { createKnowledge } from '@local/dari-model';
 import { installWorkMethods } from './work-methods.ts';
 import { createTimeContext } from '@local/dari-model';
@@ -57,3 +59,15 @@ export function apply(ctx: PluginContext, config: PluginConfig = {}): void {
 export {dariHost} from '@local/dari-model';
 
 export {createIntegration} from '@local/dari-model';
+
+// 同一个 bundle 既是 DSH 插件，也是它拉起的 DARI service；由环境变量区分角色。
+if (process.env.DARI_SERVICE === '1') {
+  // 先清掉标记：--integration 若指向本文件，导入时不能再次进入 service 模式。
+  delete process.env.DARI_SERVICE;
+  const argv = process.argv.slice(2);
+  const custom = argv.includes('--integration');
+  await runService(argv, custom ? undefined : async (flags) => {
+    const options = JSON.parse(flags.options ?? '{}') as { model?: string };
+    return createIntegration({ model: options.model, database: flags.database });
+  });
+}
