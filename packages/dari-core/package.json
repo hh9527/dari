@@ -1,7 +1,18 @@
 {
- "name":"@local/dari-core","version":"0.1.0","type":"module","private":true,
- "description":"DARI parser, type proofs, typed plans, runtime and integration ports",
- "engines":{"node":">=24"},
- "exports":{".":"./dist/index.js","./testing":"./dist/testing/model.js","./codecs":"./dist/primary-codecs.js"},
- "files":["dist"],"scripts":{"build":"tsc -p tsconfig.json","typecheck":"tsc -p tsconfig.json --noEmit"}
+ "name": "@local/dari-core",
+ "version": "0.1.0",
+ "type": "module",
+ "private": true,
+ "description": "DARI parser, type proofs, typed plans, runtime and integration ports",
+ "engines": {
+  "node": ">=24"
+ },
+ "exports": {
+  ".": "./src/index.ts",
+  "./testing": "./src/testing/model.ts",
+  "./codecs": "./src/primary-codecs.ts"
+ },
+ "scripts": {
+  "typecheck": "tsc -p tsconfig.json --noEmit"
+ }
 }

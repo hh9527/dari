@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {TeloraWasm} from '../src/telora-wasm.mjs';
-import {encodeLocatedInput} from '../src/located-input.mjs';
+import {encodeLocatedInput} from '../../../dari-model/src/located-input.mjs';
 assert.equal(process.argv.length,4,'pass a plain artifact and a snapshot artifact');
 for(const path of process.argv.slice(2)){
  const runtime=new TeloraWasm(readFileSync(path)),divide=(n:number)=>runtime.request(encodeLocatedInput({method:'test',input:{method:'divide',input:n}}));

@@ -1,1 +1,29 @@
-{"compilerOptions":{"target":"ES2023","module":"NodeNext","moduleResolution":"NodeNext","declaration":true,"sourceMap":true,"rewriteRelativeImportExtensions":true,"strict":false,"skipLibCheck":true,"types":["node"]}}
+{
+ "compilerOptions": {
+  "target": "ES2023",
+  "module": "NodeNext",
+  "moduleResolution": "NodeNext",
+  "declaration": true,
+  "sourceMap": true,
+  "rewriteRelativeImportExtensions": true,
+  "strict": false,
+  "skipLibCheck": true,
+  "types": [
+   "node"
+  ],
+  "paths": {
+   "@local/dari-core": [
+    "./packages/dari-core/src/index.ts"
+   ],
+   "@local/dari-core/testing": [
+    "./packages/dari-core/src/testing/model.ts"
+   ],
+   "@local/dari-core/codecs": [
+    "./packages/dari-core/src/primary-codecs.ts"
+   ],
+   "@local/dari-model": [
+    "./packages/dari-model/src/index.ts"
+   ]
+  }
+ }
+}

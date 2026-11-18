@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {encodeLocatedInput} from '../src/located-input.mjs';
+import {encodeLocatedInput} from '../../../dari-model/src/located-input.mjs';
 assert.equal(encodeLocatedInput(null).toString('hex'),'544c4931000000000000000000');
 assert.equal(encodeLocatedInput(true).toString('hex'),'544c4931020000000000000000');
 const max=encodeLocatedInput(9223372036854775807n);assert.equal(max.readBigInt64LE(13),9223372036854775807n);

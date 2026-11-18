@@ -13,7 +13,7 @@ try{
  const cli=join(runtime,'bin/dari.mjs');
  const file=join(root,'sample.dari'),dbfile=join(root,'sample.sqlite');
  writeFileSync(file,readFileSync(new URL('../examples/device.dari',import.meta.url)));
- const integration=join(root,'integration.mjs');writeFileSync(integration,`import {createFixtureModel} from ${JSON.stringify(pathToFileURL(join(repository,'packages/dari-core/dist/testing/model.js')).href)};import {DatabaseSync} from 'node:sqlite';export function createIntegration(options){let db;const {model}=createFixtureModel({query(sql,args){db??=new DatabaseSync(options.database,{readOnly:true});return db.prepare(sql).all(...args);}});return {checker:model,executor:model,close(){db?.close();}};}`);
+ const integration=join(root,'integration.mjs');writeFileSync(integration,`import {createFixtureModel} from ${JSON.stringify(pathToFileURL(join(repository,'packages/dari-core/src/testing/model.ts')).href)};import {DatabaseSync} from 'node:sqlite';export function createIntegration(options){let db;const {model}=createFixtureModel({query(sql,args){db??=new DatabaseSync(options.database,{readOnly:true});return db.prepare(sql).all(...args);}});return {checker:model,executor:model,close(){db?.close();}};}`);
  const db=new DatabaseSync(dbfile);db.exec("CREATE TABLE devices(id TEXT,name TEXT,cpu REAL,tenant TEXT);INSERT INTO devices VALUES('a','A',20,'t'),('b','B',50,'t')");db.close();
  assert.match(run([cli,'check',file,'--integration',integration]),/readings: Table/);
  assert.match(run([cli,'run',file,'--integration',integration,'--database',dbfile,'--inputs','{"request":{"floor":5}}']),/50/);

@@ -3,10 +3,10 @@ import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const from = join(root, '..', 'dari-model', 'dist');
+const from = join(root, '..', 'dari-model', 'src');
 mkdirSync(join(root, 'dist'), { recursive: true });
 for (const name of ['model-worker.mjs', 'located-input.mjs', 'telora-wasm.mjs']) {
   const file = join(from, name);
-  if (!existsSync(file)) throw new Error(`缺少 ${file}；先构建 dari-model`);
+  if (!existsSync(file)) throw new Error(`缺少 ${file}`);
   copyFileSync(file, join(root, 'dist', name));
 }

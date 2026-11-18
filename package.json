@@ -11,8 +11,8 @@
   "node": ">=24"
  },
  "scripts": {
-  "build": "npm run build -w @local/dari-core && npm run build -w @local/dari-model && npm run build -w @local/dari",
-  "typecheck": "npm run build -w @local/dari-core && npm run typecheck -w @local/dari-model && npm run typecheck -w @local/dari",
+  "build": "npm run build -w @local/dari",
+  "typecheck": "npm run typecheck -w @local/dari-core && npm run typecheck -w @local/dari-model && npm run typecheck -w @local/dari",
   "test": "node tests/run.mjs",
   "check": "npm run typecheck && npm test"
  },
