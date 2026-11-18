@@ -30,7 +30,7 @@ export const contextSelectors:Readonly<Record<string,{key:string;type:Type;descr
 export const optional=(t:Type):Type=>t.kind==='option'?t:{kind:'option',inner:t};
 export const present=(t:Type):Type=>t.kind==='option'?t.inner!:t;
 const numeric=(type:Type):boolean=>{let t=present(type);if(t.codec?.variants||t.name?.startsWith('Reference('))return false;while(t.kind==='nominal')t=t.inner!;return t.name==='Int'||t.name==='Float';};
-export function show(t:Type):string{if(t.kind==='schema')return 'Schema({'+Object.entries(t.fields!).map(([n,t])=>n+': '+show(t)).join(', ')+'})';if(['option','table'].includes(t.kind))return (t.kind==='option'?'Option':'Table')+'('+show(t.inner!)+')';return t.displayName??t.name??t.kind;}
+export function show(t:Type):string{if(t.kind==='schema')return 'Schema({'+Object.entries(t.fields!).map(([n,t])=>n+': '+show(t)).join(', ')+'})';if(t.kind==='array')return 'Array('+(t.inner?show(t.inner):'?')+')';if(['option','table'].includes(t.kind))return (t.kind==='option'?'Option':'Table')+'('+show(t.inner!)+')';return t.displayName??t.name??t.kind;}
 export const same=(a:Type,b:Type):boolean=>a.kind===b.kind&&(a.kind==='schema'?Object.keys(a.fields!).length===Object.keys(b.fields!).length&&Object.entries(a.fields!).every(([k,t])=>!!b.fields![k]&&same(t,b.fields![k])):a.kind==='option'||a.kind==='table'?same(a.inner!,b.inner!):a.name===b.name);
 const err=(n:Node,message:string,details:FaultDetails={}):never=>{throw new Fault(message,n.at,{...(n.k==='call'?{expression:expressionHint(n)}:{}),...details});};
 export function projectionType(input:Type,path:readonly string[]):Type {
