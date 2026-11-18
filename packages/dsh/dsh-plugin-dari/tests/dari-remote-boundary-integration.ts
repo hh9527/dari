@@ -1,4 +1,4 @@
-// Explicit integration: node tests/dari-remote-boundary-integration.ts <service.js> <ic-dari.wasm> <icloud.sqlite> [integration.mjs]
+// Explicit integration: node tests/dari-remote-boundary-integration.ts <service.mjs> <ic-dari.wasm> <icloud.sqlite> [integration.mjs]
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {existsSync,mkdtempSync,rmSync} from 'node:fs';
