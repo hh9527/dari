@@ -19,14 +19,14 @@
 npm ci
 npm run build
 npm test
-node packages/dari/bin/dari.mjs check examples/local.dari
-node packages/dari/bin/dari.mjs run examples/local.dari
+node packages/dari/lib/dari.mjs check examples/local.dari
+node packages/dari/lib/dari.mjs run examples/local.dari
 ```
 
 `check` 不读取业务行。`run` 创建独立内存 SQLite 工作库，`--database` 将业务数据库路径交给可信 integration，由适配器只读打开，图表或报告产物通过 `--output directory` 输出。两者均可配置 `--integration module.mjs --options '{...}'`。模型取数示例见 `examples/device.dari`，可使用独立夹具 `examples/demo-integration.mjs`，它查询 `devices(id,name,cpu,tenant)` 表；这些示例不依赖生产模型。
 
 ```sh
-node packages/dari/bin/dari.mjs check examples/device.dari --integration examples/demo-integration.mjs
+node packages/dari/lib/dari.mjs check examples/device.dari --integration examples/demo-integration.mjs
 ```
 
 DARI 文件不能加载模块或执行任意 JavaScript；integration 是由启动命令选择的可信宿主代码。包之间通过各自公开出口引用，集成方按 [集成接口](docs/INTEGRATION.md) 提供模型与展现实现。
@@ -34,8 +34,8 @@ DARI 文件不能加载模块或执行任意 JavaScript；integration 是由启�
 ## 编辑器
 
 ```sh
-node packages/dari/bin/dari-lsp.mjs --workspace /path/to/workspace
-node packages/dari/bin/dari-lsp.mjs --integration /path/to/integration.mjs --options '{...}'
+node packages/dari/lib/dari.mjs lsp --workspace /path/to/workspace
+node packages/dari/lib/dari.mjs lsp --integration /path/to/integration.mjs --options '{...}'
 ```
 
 LSP 使用标准 stdio 协议，提供多错误诊断、修复建议、补全、悬停、局部定义跳转和文档符号，支持增量文本变更与 UTF-16 位置。解析和类型来自同一编译前端。未配置模型时，远端证明明确显示为待完成，独立的本地节点仍继续检查；已发布的模型源位置可由 integration.symbols 提供。

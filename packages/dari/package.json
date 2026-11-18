@@ -8,18 +8,18 @@
   "node": ">=24"
  },
  "exports": {
-  ".": "./dist/cli.mjs"
+  ".": "./lib/dari.mjs",
+  "./service": "./src/service.ts"
  },
  "bin": {
-  "dari": "./bin/dari.mjs",
-  "dari-lsp": "./bin/dari-lsp.mjs"
+  "dari": "./lib/dari.mjs",
+  "dari-lsp": "./lib/dari.mjs"
  },
  "files": [
-  "dist",
-  "bin"
+  "lib"
  ],
  "scripts": {
-  "build": "tsdown && node scripts/copy-assets.mjs",
+  "build": "rm -rf lib && tsdown",
   "typecheck": "tsc -p tsconfig.json --noEmit"
  },
  "devDependencies": {

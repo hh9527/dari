@@ -6,13 +6,14 @@ import {resolve} from '@local/dari-core';
 import {sqlite} from './adapters/sqlite.ts';
 import {renderDiagnostics} from '@local/dari-core';
 import {loadIntegration,argumentsOf} from './load-integration.ts';
-const lines=createInterface({input:process.stdin,crlfDelay:Infinity});
-const requests=lines[Symbol.asyncIterator]();
-const {flags}=argumentsOf(process.argv.slice(2));
-for(const flag of Object.keys(flags))if(!['integration','options','database'].includes(flag))throw Error('Unknown option --'+flag);
-const integration=await loadIntegration(flags.integration,{...(flags.options?JSON.parse(flags.options):{}),...(flags.database?{database:flags.database}:{})});
-const programs=new Map<string,Program>();
-try{
+export async function runService(argv:string[]=process.argv.slice(2),makeIntegration?:(flags:Record<string,string>)=>Promise<import('./integration.ts').Integration>):Promise<void>{
+ const lines=createInterface({input:process.stdin,crlfDelay:Infinity});
+ const requests=lines[Symbol.asyncIterator]();
+ const {flags}=argumentsOf(argv);
+ for(const flag of Object.keys(flags))if(!['integration','options','database'].includes(flag))throw Error('Unknown option --'+flag);
+ const integration=makeIntegration?await makeIntegration(flags):await loadIntegration(flags.integration,{...(flags.options?JSON.parse(flags.options):{}),...(flags.database?{database:flags.database}:{})});
+ const programs=new Map<string,Program>();
+ try{
  for await(const line of requests){
   let id:unknown;
   try{
@@ -35,3 +36,4 @@ try{
   }catch(error){process.stdout.write(JSON.stringify({id,error:error instanceof Error?error.message:String(error)})+'\n');}
  }
 }finally{await integration.close?.();}
+}

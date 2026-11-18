@@ -1,13 +1,13 @@
 # 编辑器集成
 
-先构建 workspace，再启动 `dari lsp`（等价入口 `packages/dari/bin/dari-lsp.mjs`）。查询文件改动后用 `just install-into-helix` 同步到本机 Helix（`HELIX_DIR` 可覆盖配置目录）。标准输出专用于 LSP 帧，日志写入标准错误。
+先构建 workspace，再启动 `dari lsp`（等价入口 `packages/dari/lib/dari.mjs lsp`）。查询文件改动后用 `just install-into-helix` 同步到本机 Helix（`HELIX_DIR` 可覆盖配置目录）。标准输出专用于 LSP 帧，日志写入标准错误。
 
 Helix 的 languages.toml 示例：
 
 ```toml
 [language-server.dari]
 command = "node"
-args = ["/absolute/path/dari/packages/dari/bin/dari-lsp.mjs", "--workspace", "/absolute/path/to/workspace"]
+args = ["/absolute/path/dari/packages/dari/lib/dari.mjs", "lsp", "--workspace", "/absolute/path/to/workspace"]
 
 [[language]]
 name = "dari"

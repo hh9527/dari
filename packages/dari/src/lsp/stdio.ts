@@ -6,8 +6,9 @@ import {createIntegration} from '@local/dari-model';
 import {loadWorkspaceConfig} from '@local/dari-model';
 import {serveLsp} from './transport.ts';
 import type {Integration} from '../integration.ts';
-try{
- const {flags}=argumentsOf(process.argv.slice(2));
+export async function runLsp(argv:string[]=process.argv.slice(2)):Promise<void>{
+ try{
+ const {flags}=argumentsOf(argv);
  for(const flag of Object.keys(flags))if(!['integration','options','workspace'].includes(flag))throw Error('Unknown option --'+flag);
  const options=flags.options?JSON.parse(flags.options) as Record<string,unknown>:{};
  // 工作区以打开的文件为准：从文件所在目录向上找 dari.json。
@@ -46,3 +47,4 @@ try{
   return integration;
  });
 }catch(error){process.stderr.write('DARI LSP: '+(error as Error).message+'\n');process.exitCode=1;}
+}

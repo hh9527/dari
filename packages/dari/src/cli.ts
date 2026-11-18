@@ -7,11 +7,13 @@ import {sqlite} from './adapters/sqlite.ts';
 import {renderDiagnostics} from '@local/dari-core';
 import {loadIntegration,argumentsOf} from './load-integration.ts';
 import type {Integration} from './integration.ts';
+import {runLsp} from './lsp/stdio.ts';
+import {runService} from './service.ts';
 let integration:Integration={};
 try{
  const {positional:[command,file],flags}=argumentsOf(process.argv.slice(2));
- if(command==='lsp')await import('./lsp/stdio.ts');
- else if(command==='serve')await import('./service.ts');
+ if(command==='lsp')await runLsp(process.argv.slice(2));
+ else if(command==='serve')await runService(process.argv.slice(2));
  else if(!['check','run'].includes(command)||!file)throw Error('Usage: dari check|run file.dari [--integration module.js] [--options json] [--database file.sqlite] [--inputs json] [--context json] [--context-contract id] [--output directory]\n       dari lsp [--workspace dir] [--options json] [--integration module.js]');
  else {
  for(const flag of Object.keys(flags))if(!['integration','options','database','inputs','context','context-contract','output'].includes(flag))throw Error('Unknown option --'+flag);
