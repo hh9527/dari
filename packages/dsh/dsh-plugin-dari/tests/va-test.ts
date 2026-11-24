@@ -10,11 +10,18 @@ function harness(options:any={}){
   const output=text?[{type:'text',text}]:[];runs.get(id)?.({stopReason,output});runs.delete(id);
   for(const f of handlers.get('subagent/end')??[])f({id,stopReason,lastAssistantMessage:output});
  };
- const service={listChildren:async()=>options.children??[],async startActivation(spec:any){
+ const service:any={listChildren:async()=>options.children??[],async startActivation(spec:any){
+  assert.ok(spec.parent?.id);assert.equal(spec.cwd,'/workspace');assert.ok(Array.isArray(spec.prompt));assert.equal(spec.request,undefined);
+  if(options.validateActivation)await options.validateActivation(spec);
   starts.push(spec);if(options.fail)throw Error('admission failure');spec.signal.throwIfAborted();
   const result=new Promise(resolve=>runs.set(spec.childId,resolve));if(!options.manual)queueMicrotask(()=>settled(spec.childId));
   return{childId:spec.childId,messageId:'initial',result,async dispose(){disposed.push(spec.childId);settled(spec.childId,'aborted','')}};
  },async sendMessage(parent:any,childId:string,prompt:any,request:any){sends.push({parent,childId,prompt,...request});request.signal.throwIfAborted();if(!options.manual)queueMicrotask(()=>settled(childId));return 'followup-'+sends.length},async drainChildren(_p:any,ids:string[]){for(const id of ids){disposed.push(id);settled(id,'aborted','')}}};
+ if(options.modern){
+  delete service.listChildren;delete service.drainChildren;
+  service.listDescendants=async()=>options.children??[];
+  service.interrupt=(id:string,authority:any)=>{assert.equal(authority.kind,'ancestor');assert.ok(authority.agent);disposed.push(id);settled(id,'aborted','')};
+ }
  const runtime=createVaRuntime({ctx:{get:()=>options.missing?undefined:service,on(n:string,f:any){handlers.set(n,[...(handlers.get(n)??[]),f]);return()=>{}},effect(f:any){effects.push(f())}} as any,config:options.config,log(){}});
  return{runtime,starts,sends,settled,disposed,handlers,unload:()=>effects.forEach(f=>f())};
 }
@@ -47,8 +54,8 @@ test('错误、空答案、卸载及提交失败都不会当作成功答案',asy
  await assert.rejects(harness().runtime.ask(caller(),'p','问题',AbortSignal.abort()));
 });
 test('推理档位按当前路由继承，只有 DeepSeek 默认 off',async()=>{
- for(const [model,effort] of [['deepseek-flash','off'],['qwen',undefined]]){const h=harness(),p=caller();p.session.requestHeader=()=>({config:{model}});await h.runtime.ask(p,'p','问题');assert.deepEqual(h.starts[0].request.agentOptions,effort?{reasoningEffort:effort}:undefined)}
- const custom=harness({config:{vaPreset:'custom',vaReasoningEffort:'low'}});await custom.runtime.ask(caller(),'p','问题');assert.equal(custom.starts[0].request.agentPreset,'custom');assert.deepEqual(custom.starts[0].request.agentOptions,{reasoningEffort:'low'});
+ for(const [model,effort] of [['deepseek-flash','off'],['qwen',undefined]]){const h=harness(),p=caller();p.session.requestHeader=()=>({config:{model}});await h.runtime.ask(p,'p','问题');assert.deepEqual(h.starts[0].agentOptions,effort?{reasoningEffort:effort}:undefined)}
+ const custom=harness({config:{vaPreset:'custom',vaReasoningEffort:'low'}});await custom.runtime.ask(caller(),'p','问题');assert.equal(custom.starts[0].agentPreset,'custom');assert.deepEqual(custom.starts[0].agentOptions,{reasoningEffort:'low'});
 });
 test('助手装配按当前工作区提供完整词表，空工具面与逐字文本',async()=>{
  let assemble:any;const sections:any[]=[],restrictions:any[]=[],policies:any[]=[],seen:string[]=[];
@@ -102,7 +109,7 @@ test('VA 作为独立子会话，复用自己的预设与前缀',async()=>{
  const h=harness({vocabulary:true});const parentAgent=caller('session-parent');
  const first=await h.runtime.ask(parentAgent,parentAgent.session.id,'CPU');
  assert.match(first.helper,/^session-va-/);assert.equal(h.starts[0].label,'词汇助手');
- assert.equal(h.starts[0].request.agentPreset,'dari-vocabulary');assert.equal(h.starts[0].request.parent,parentAgent);
+ assert.equal(h.starts[0].agentPreset,'dari-vocabulary');assert.equal(h.starts[0].parent,parentAgent);
  assert.equal((await h.runtime.ask(parentAgent,parentAgent.session.id,'内存')).helper,first.helper);
 });
 
@@ -154,4 +161,51 @@ test('VA 在独立 preset 装配时继承父调用已解析模型，咨询结束
  const child=caller(childId);child.session.append=()=>{};
  await assemble({},{agent:child},async()=>({sections:[],tools:[]}));assert.equal(received,settings);
  h.settled(childId);await result;assert(!VA_SETTINGS.has(childId));
+});
+
+
+test('rc.5 递归发现只恢复直接子会话，忽略孙级与诊断行',async()=>{
+ const rows=[
+  {kind:'child',parentId:'parent',depth:1,mode:'continuable',id:'session-va-direct',label:'词汇助手'},
+  {kind:'child',parentId:'another',depth:2,mode:'continuable',id:'session-va-grandchild',label:'词汇助手'},
+  {kind:'child',parentId:'another',depth:1,mode:'continuable',id:'session-va-other-parent',label:'词汇助手'},
+  {kind:'child',parentId:'parent',depth:2,mode:'continuable',id:'session-va-deeper',label:'词汇助手'},
+  {kind:'diagnostic',parentId:'parent',depth:1,mode:'continuable',id:'session-va-diagnostic',label:'词汇助手'},
+ ];
+ const h=harness({modern:true,children:rows});
+ assert.equal((await h.runtime.ask(caller(),'p','恢复')).helper,'session-va-direct');
+ assert.equal(h.starts.length,0);
+ const fresh=harness({modern:true,children:rows.slice(1)});
+ assert.notEqual((await fresh.runtime.ask(caller(),'p','新建')).helper,'session-va-grandchild');
+ assert.equal(fresh.starts.length,1);
+});
+
+test('rc.5 恢复会话取消时以 ancestor 身份中断，后续咨询仍可完成',async()=>{
+ const id='session-va-direct',h=harness({modern:true,manual:true,children:[{kind:'child',parentId:'parent',depth:1,mode:'continuable',id,label:'词汇助手'}]}),parent=caller();
+ const abort=new AbortController();
+ const run=h.runtime.ask(parent,'p','取消',abort.signal,{domain:'ic',model:'/model.wasm'} as any);
+ await flush();assert.equal(h.sends.length,1);assert.ok(VA_SETTINGS.has(id));
+ abort.abort(Error('cancelled'));await assert.rejects(run,/cancelled/);
+ assert.deepEqual(h.disposed,[id]);assert.ok(!VA_SETTINGS.has(id));
+ const retry=h.runtime.ask(parent,'p','重试');await flush();h.settled(id,'completed','重试答案');
+ assert.equal((await retry).answer,'重试答案');assert.equal(h.sends.length,2);
+});
+
+
+test('真实 rc.5 startActivation 接受词汇助手的顶层参数，拒绝旧 request 包装', {skip:!process.env.DSH_SUBAGENT_MODULE}, async()=>{
+ const {SubagentRuntime}=await import(process.env.DSH_SUBAGENT_MODULE!);
+ const parent=caller();
+ const host=Object.create(SubagentRuntime.prototype);
+ const admitted:any[]=[];
+ Object.defineProperty(host,'ctx',{value:{get:(name:string)=>name==='agents'?{get:(id:string)=>id===parent.id?parent:undefined}:undefined}});
+ host.providers=new Map([['spawn',{name:'spawn',capabilities:{agentPreset:true,agentOptions:true},inheritsParentContext:false,prepareContinuable(){}}]]);
+ host.manager={startLocal(spec:any){admitted.push(spec);}};
+ const h=harness({modern:true,validateActivation:async(spec:any)=>{
+  await assert.rejects(host.startActivation({...spec,parent:undefined,request:{parent}}),/reading 'id'/);
+  await host.startActivation(spec);
+ }});
+ const result=await h.runtime.ask(parent,'p','告警数量');
+ assert.equal(result.answer,'助手答案');assert.equal(admitted.length,1);
+ assert.equal(admitted[0].parent,parent);assert.equal(admitted[0].agentPreset,'dari-vocabulary');
+ assert.deepEqual(admitted[0].prompt,[{type:'text',text:'告警数量'}]);
 });

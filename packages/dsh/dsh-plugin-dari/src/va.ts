@@ -70,9 +70,13 @@ export function createVaRuntime({ ctx, log, config }: {
             const cwd = caller.session?.header?.cwd;
             if (!cwd) throw new Error(' 调用方会话没有 cwd。');
             const service = ctx.get('subagents');
-            if (!service?.startActivation || !service.sendMessage || !service.listChildren) throw new Error(' 词汇助手需要宿主 subagents 服务。');
+            if (!service?.startActivation || !service.sendMessage || (!service.listDescendants && !service.listChildren)) throw new Error(' 词汇助手需要宿主 subagents 服务。');
             if (!owned.discovered) {
-              const children = await service.listChildren(caller.session.id!, requestSignal);
+              const parentId = caller.session.id!;
+              // 递归发现结果只复用调用方的直接子会话；诊断行和更深后代均不参与。
+              const children = service.listDescendants
+                ? (await service.listDescendants(parentId, requestSignal)).filter(row => row.kind === 'child' && row.parentId === parentId && row.depth === 1)
+                : await service.listChildren!(parentId, requestSignal);
               owned.childId = children.findLast(child => child.mode === 'continuable' && child.label === label && child.id.startsWith(prefix))?.id;
               owned.discovered = true;
             }
@@ -92,8 +96,8 @@ export function createVaRuntime({ ctx, log, config }: {
               const route = caller.session.requestHeader?.()?.config ?? caller.options;
               const effort = config?.vaReasoningEffort?.trim() || (/^deepseek(?:[-_/]|$)/i.test(route?.model ?? '') ? 'off' : 'inherit');
               activation = await service.startActivation({ provider: 'spawn', label, childId, delivery: 'caller', signal: requestSignal,
-                request: { parent: caller, cwd, agentPreset: preset, prompt,
-                  ...(effort === 'inherit' ? {} : { agentOptions: { reasoningEffort: effort } }) } });
+                parent: caller, cwd, agentPreset: preset, prompt,
+                ...(effort === 'inherit' ? {} : { agentOptions: { reasoningEffort: effort } }) });
               submitted = true;
               messageId = activation.messageId;
               completion = activation.result;
@@ -108,7 +112,11 @@ export function createVaRuntime({ ctx, log, config }: {
           } catch (error) {
             if (submitted && requestSignal.aborted) {
               if (activation) await activation.dispose();
-              else if (childId) await ctx.get('subagents')?.drainChildren(caller, [childId]);
+              else if (childId) {
+                const host = ctx.get('subagents');
+                if (host?.drainChildren) await host.drainChildren(caller, [childId]);
+                else host?.interrupt?.(childId, { kind: 'ancestor', agent: caller });
+              }
             }
             throw error;
           } finally { clearTimeout(timer); if (childId) { pending.delete(childId); VA_SETTINGS.delete(childId); } }

@@ -61,9 +61,17 @@ export interface SubagentActivation {
   dispose(): Promise<void>;
 }
 
+/** 子会话发现行：新宿主带 kind（child/diagnostic），旧宿主只有 id/label/mode。 */
+export interface SubagentListRow { id: string; label?: string; mode?: string; kind?: 'child' | 'diagnostic' }
+export interface SubagentDescendantListRow extends SubagentListRow { kind: 'child' | 'diagnostic'; parentId: string; depth: number }
+
 export interface SubagentsService {
-  listChildren(parentSessionId: string, signal?: AbortSignal): Promise<{ id: string; label?: string; mode: string }[]>;
-  drainChildren(parent: AgentLike, childIds: string[]): Promise<void>;
+  /** 旧宿主的直接子会话查询。 */
+  listChildren?(parentSessionId: string, signal?: AbortSignal): Promise<SubagentListRow[]>;
+  /** 递归发现全部后代及诊断行，保留直接父会话和相对深度。 */
+  listDescendants?(rootSessionId: string, signal?: AbortSignal): Promise<SubagentDescendantListRow[]>;
+  drainChildren?(parent: AgentLike, childIds: string[]): Promise<void>;
+  interrupt?(targetSessionId: string, authority: { kind: 'ancestor'; agent: AgentLike }): void;
   sendMessage(parent: AgentLike, childId: string, prompt: ContentBlock[], options: { signal: AbortSignal }): Promise<string>;
   startActivation(spec: {
     provider: string;
@@ -71,13 +79,11 @@ export interface SubagentsService {
     childId: string;
     delivery: 'parent' | 'caller';
     signal: AbortSignal;
-    request: {
-      parent: AgentLike;
-      cwd: string;
-      agentPreset: string;
-      prompt: ContentBlock[];
-      agentOptions?: { reasoningEffort: string };
-    };
+    parent: AgentLike;
+    cwd: string;
+    agentPreset: string;
+    prompt: ContentBlock[];
+    agentOptions?: { reasoningEffort: string };
   }): Promise<SubagentActivation>;
 }
 
