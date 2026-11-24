@@ -326,7 +326,7 @@ data daily = query_remote! {
 };
 ```
 
-EpochMillis 来源写成 `calendar_bucket(to_datetime_utc(a.epoch), CalendarUnit::Day, ctx.tz)`。固定地区也使用地区身份，如 `data zone = TimeZone("America/New_York");`，不接受裸 String 或隐式 UtcOffset。地区桶与 UTC 桶都返回桶键的 UTC 表达；展示时用 formats 指定地区与日期样式，无需变更桶键类型。
+EpochMillis 来源写成 `calendar_bucket(to_datetime_utc(a.epoch), CalendarUnit::Day, ctx.tz)`。固定地区也使用地区身份，如 `data zone = TimeZone("America/New_York");`，不接受裸 String 或隐式 UtcOffset。示例使用 `America/New_York` 演示语法；实际地区应来自用户要求或上下文，不能从示例推定。地区桶与 UTC 桶都返回桶键的 UTC 表达；展示时用 formats 指定地区与日期样式，无需变更桶键类型。
 
 query! 中使用同一表达式，先投影桶再分组。query_remote! 第一版的 zone 是类型化参数，来自顶层 data；模型成员中的普通 String 时区字段尚未自动提升为 TimeZone。检查期由模型证明时间类型、单位和时区参数契约，执行期绑定实际地区 ID。SQLite 适配固定注册 dari_calendar_bucket，PostgreSQL 使用原生三参数 date_trunc；UQL 不支持此算子。执行侧不另行选择语义或回退固定偏移。
 

@@ -172,7 +172,7 @@ data daily = query_remote! {
 };
 ```
 
-固定地区用 `data zone = TimeZone("America/New_York");`。远端 zone 须为非空 TimeZone 参数，普通 String 成员不是地区身份。模型决定日历语义，适配 PostgreSQL/SQLite；分桶键用于分组，筛选边界用 DateRange/at_zone。无效地区报错，无默认时区回退；DateTimeLocal 和固定时长分桶尚未提供。
+固定地区用 `TimeZone` 显式指定，例如 `data zone = TimeZone("America/New_York");`。示例使用 `America/New_York` 演示语法；实际地区应来自用户要求或上下文，不能从示例推定。远端 zone 须为非空 TimeZone 参数，普通 String 成员不是地区身份。模型决定日历语义，适配 PostgreSQL/SQLite；分桶键用于分组，筛选边界用 DateRange/at_zone。无效地区报错，无默认时区回退；DateTimeLocal 和固定时长分桶尚未提供。
 
 ## 展示树与交付
 
