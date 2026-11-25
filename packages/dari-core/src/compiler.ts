@@ -642,6 +642,19 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
   if(n.invalid)throw new UpstreamTypeUnavailable();
   if(p.host&&n.name==='ColumnChart')err(n,'Unknown component '+n.name+'; available figure components: '+p.host.components.join(', '));
   const attrs:Record<string,Node>=Object.create(null);for(const a of n.attrs){if(Object.hasOwn(attrs,a.name))err(a,'Duplicate attribute '+a.name);attrs[a.name]=a.value;}
+  function presentationBound(key:string,binding:Binding):Fault|undefined {
+   const maxRows=binding.result?.maxRows;
+   if(maxRows!==undefined&&maxRows<=MAX_PRESENTATION_ROWS)return;
+   const ref=attrs[key],name=ref.path[0];
+   const current=maxRows===undefined?'尚未证明行数上界':'已证明至多 '+maxRows+' 行';
+   return new Fault(n.name+' input '+key+' ('+name+') requires a proven bound <= '+MAX_PRESENTATION_ROWS,ref.at,{
+    code:'presentation-bound',
+    reason:name+' '+current+'，此组件最多接收 '+MAX_PRESENTATION_ROWS+' 行',
+    suggestion:binding.modelPlan!==undefined
+     ?'调整远端节点 '+name+'，按任务口径聚合，或排序后取所需条数。需要完整总量时，用同一筛选口径另做库内聚合'
+     :'调整展现输入 '+name+'，按任务口径聚合，或在最后需要本地处理的节点排序并取所需条数'
+   });
+  }
   if(p.host?.components.includes(n.name)){
    if(n.children.length)err(n,'Figure component cannot have children');
    const binding=(key:string)=>{const ref=attrs[key];if(ref?.k!=='ref'||ref.path.length!==1)err(ref??n,key+' requires a Table declaration reference');const b=p.bindings.get(ref.path[0]);if(!b&&failed.has(ref.path[0]))throw new UpstreamTypeUnavailable();if(b?.type.kind!=='table'||b.type.inner?.kind!=='schema')err(ref,key+' requires Table(Schema)');attributeType(key,b!.type);return b!;};
@@ -649,7 +662,9 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    const allowed=['data','nodes','spec',...(attrs.spec?[]:['x','value','series','title','style','layout','allow_no_data','value_min','unit','x_label','value_label','formats','x_axis'])];
    settle(n.attrs,(attribute:Node)=>{if(!allowed.includes(attribute.name))err(attribute,'Unknown figure attribute '+attribute.name+' on '+n.name+'; chart configuration belongs in spec = {...}');});
    const data=binding('data'),nodes=attrs.nodes?binding('nodes'):undefined,fields={...data.type.inner!.fields!};
-   for(const b of [data,...(nodes?[nodes]:[])])if(b.result?.maxRows===undefined||b.result.maxRows>MAX_PRESENTATION_ROWS)finding(new Fault('Figure input '+(b===data?'data':'nodes')+' requires a proven bound <= '+MAX_PRESENTATION_ROWS,n.at,{code:'presentation-bound',reason:'每个图表输入独立受展现行数上限约束，取数上界不等于展现上界',suggestion:'先按业务聚合，或 order_by(...) |> take(110) 后再交给组件；不自动截断'}));
+   const dataBound=presentationBound('data',data);
+   if(dataBound)finding(dataBound);
+   if(nodes){const nodesBound=presentationBound('nodes',nodes);if(nodesBound)finding(nodesBound);}
    const spec=attrs.spec?figureSpec(attrs.spec,fields,n,env):figureSpec({k:'object',at:n.at,fields:Object.entries(attrs).filter(([key])=>!['data','nodes'].includes(key)).map(([name,value])=>({k:'field',name,value,at:value.at}))},fields,n,env);
    try{p.host.checkFigure(n.name,spec,fields,nodes?.type.inner!.fields);}catch(e){finding(new Fault((e as Error).message,attrs.spec?.at??n.at));}
    if(diagnostics.hasErrors(checkpoint))throw new UpstreamTypeUnavailable();
@@ -673,7 +688,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
   }
   for(const a of signature[n.name])if(builtinComponents[n.name].attributes[a].required&&!attrs[a])err(n,'Missing attribute '+a+' on '+n.name);
   const lookup=(a:string)=>{const v=attrs[a];if(v?.k!=='ref'||v.path.length!==1)err(v??n,a+' requires a declaration reference');const b=p.bindings.get(v.path[0]);if(!b&&failed.has(v.path[0]))throw new UpstreamTypeUnavailable();if(!b)err(v,'Unknown declaration '+v.path[0]);attributeType(a,b!.type);return b!;};
-  if(['Table','ColumnChart'].includes(n.name)){const b=lookup('data');if(b.result?.maxRows===undefined||b.result.maxRows>MAX_PRESENTATION_ROWS)err(n,'Presentation requires a proven bound <= '+MAX_PRESENTATION_ROWS,{code:'presentation-bound',reason:'表格输入必须证明不超过展现上限；最多取数 500 行不代表可全部展现',suggestion:'先聚合或按业务 order_by(...) |> take(110)，不自动截断'});}
+  if(['Table','ColumnChart'].includes(n.name)){const bound=presentationBound('data',lookup('data'));if(bound)throw bound;}
   if(['Table','ColumnChart'].includes(n.name)){const b=lookup('data');if(b.type.kind!=='table'||b.type.inner!.kind!=='schema')err(attrs.data,'Expected Schema rows');for(const a of n.name==='ColumnChart'?['x','value']:[]){if(attrs[a].k!=='projection')err(attrs[a],'Use $.field to select a row field');const t=checkedProjection(attrs[a],b.type.inner!);let numeric=present(t);while(numeric.kind==='nominal')numeric=numeric.inner!;if(a==='value'&&!['Int','Float'].includes(numeric.name??''))err(attrs[a],'Chart value must be numeric or a newtype with numeric representation');}}
   if(n.name==='Table'){
    const fields=lookup('data').type.inner!.fields!,spec=attrs.spec?figureSpec(attrs.spec,fields,n,env):{};
@@ -776,9 +791,9 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    const expectedContainer=d.value.steps.at(-1)?.name==='take_opt'?'option':'table';
    if(shape.container!==expectedContainer)err(d,'Model result container does not match the authored query');
    if(take?.kind==='take'&&(shape.maxRows===undefined||shape.maxRows>take.count))err(d,'Model result bound exceeds the authored take('+take.count+')');
-   if(shape.element.kind!=='schema'||shape.maxRows!==undefined&&(!Number.isInteger(shape.maxRows)||shape.maxRows<0||shape.maxRows>MAX_RESULT_ROWS))err(d,'Model query must publish a record Schema and valid result bound');
+   if(shape.element.kind!=='schema'||shape.maxRows!==undefined&&(!Number.isInteger(shape.maxRows)||shape.maxRows<0))err(d,'Model query must publish a record Schema and valid result bound');
    for(const t of Object.values(shape.element.fields!)){const base=present(t);if(!['scalar','nominal'].includes(base.kind))err(d,'Model columns must be logical scalars');}
-   if(shape.maxRows===undefined||shape.maxRows>MAX_RESULT_ROWS)err(d,'Remote execution requires a proven result bound <= '+MAX_RESULT_ROWS,{code:'query-bound',reason:'每个实际执行的远端阶段必须先有界，本地下游不能限制远端取数',suggestion:'在远端阶段结束前 order_by(...) |> take(n)，n <= 500，再进行本地后处理'});
+   if(shape.maxRows===undefined||shape.maxRows>MAX_RESULT_ROWS)err(d,'Remote execution requires a proven result bound <= '+MAX_RESULT_ROWS,{code:'query-bound',reason:d.name+(shape.maxRows===undefined?' 尚未证明远端行数上界':' 已证明至多 '+shape.maxRows+' 行，超出远端上限')+'。本地下游不能限制远端取数',suggestion:'在远端阶段结束前 order_by(...) |> take(n)，n <= 500，再进行本地后处理'});
    if(intent.steps.some(s=>s.kind==='order_by')){let key='_dari_remote_order';while(Object.hasOwn(shape.element.fields!,key))key+='_';modelOrdering=[{key,direction:'asc'}];}
    t={kind:shape.container,inner:shape.element};kind='model';modelShape=shape;
   }
