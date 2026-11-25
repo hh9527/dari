@@ -25,9 +25,9 @@ query!/query_remote! 内 let 支持顺序 shadow：右侧使用旧绑定，后�
 ```telora
 data top = query! {
     let rows = from(samples);
-    let rows = rows |> filter(rows.cpu > 50.0);
-    let rows = rows |> project({name:rows.name,cpu:rows.cpu});
-    rows |> order_by(desc(rows.cpu)) |> take(10)
+    let rows = rows |> filter(rows.value > 50.0);
+    let rows = rows |> project({name:rows.name,value:rows.value});
+    rows |> order_by(desc(rows.value)) |> take(10)
 };
 ```
 
@@ -39,30 +39,46 @@ query_remote! 投影维度和度量时，模型对完整输入按所投影维度
 
 ```telora
 data rows = query_remote! {
-    let a = from(ic::current_alarm);
-    let output = project({severity:a.alarm_severity,total:a.alarm_count});
-    output |> order_by(asc(output.severity)) |> take(10)
+    let a = from(demo::Items);
+    let output = project({category:a.category,total:a.count});
+    output |> order_by(asc(output.category)) |> take(10)
 };
 
-answer tree! { Answer [h1 ["告警构成"],PieChart(data = rows,spec = {x:$.severity,value:$.total,title:"告警严重级别构成"})]};
+answer tree! { Answer [h1 ["分类构成"],PieChart(data = rows,spec = {x:$.category,value:$.total,title:"分类构成"})]};
 ```
 
 远端 project 接受已发布成员及模型支持的分桶、时间转换、not_none。常量标签、lookup、case_when 和派生列放在后续 query!；影响分组口径的计算须在聚合前完成，例如远端分桶或分别筛选完整时间窗口。
 
-逐对象指标先关联到对象身份节点并 group_by_identity，再投影称谓。设备名不能替代身份；KPI 身份可能包含采样时间，不能代替设备身份。
+`group_by_identity` 的输入计划放在 `|>` 左侧，参数是该计划中由 from/connect 绑定的身份节点；身份依据模型发布的绑定，名称字段不代替身份。分组结果必须继续用于投影：
+
+```telora
+data ranked = query_remote! {
+    let rows = from(demo::Items).as!(a);
+    let filtered = rows |> filter(a.category == demo::Category::A);
+    let grouped = filtered |> group_by_identity(a);
+    let output = grouped |> project({label:a.name,value:a.metric});
+    output |> order_by(desc(output.value)) |> take(5)
+};
+```
+
+group_by_identity 也可只投影身份及其决定的属性，不必添加聚合指标；不同身份即使展示名称相同也分别保留。记录级字段仍须由模型证明，不能任取一条记录。
+
+示例中的 demo:: 符号仅说明语法，实际使用模型发布的精确符号。let 绑定不可变：从 filtered 分组得到 grouped 后，从 grouped 继续；不单独调用 group_by_identity(a)，也不从旧计划重新投影。
 
 query_remote! 通过 from 引入模型源，用 `from(公开Dataset符号).as!(a) |> connect(公开Relation符号).as!(b)` 遍历关联。as! 绑定当前节点并保留整个计划，connect 从当前节点推导对端 Dataset，连续连接从最新节点继续。Relation 决定连接方向、基数和可选关联；可选关联保留根行，并使对端维度可空，即使其字段声明本身非空。自关联使用 `connect(Relation, from_node, to_node)`：先分别 `let parent = from(Dataset); let child = from(Dataset);`，端点顺序对应 Relation 发布的 from/to，管道输入可以是任一端。先用 dari_kg_info 读取涉及 Dataset 的 Relation 符号及端点。维度筛选作用于聚合前原始行，独立的度量 filter 作用于聚合后；支持多个度量 filter。维度比较采用 `成员 比较符 参数`，可连续 filter 或嵌套 && / ||；文本筛选使用 contains/not_contains/starts_with/ends_with(成员,String参数)，不区分 ASCII 大小写。参数用声明的逻辑类型，例如 EpochMillis(...)、模型 newtype 或 Type::Variant。模型检查字段是否允许对应算子。排序可引用未投影成员；聚合后只能按已有分组键、已按身份分组的节点维度或聚合度量排序，模型拒绝会改变分组口径的隐藏排序。
 
 ```telora
 data rows = query_remote! {
-    let linked = from(ic::frame).as!(f)
-        |> connect(ic::relations::frame_belongs_to_device).as!(d);
-    let output = linked |> project({frame:f.frame_name,device:d.device_name});
-    output |> order_by(asc(output.frame)) |> take(10)
+    let linked = from(demo::Items).as!(a)
+        |> connect(demo::relations::item_of_group).as!(b);
+    let output = linked |> project({item:a.name,group:b.name});
+    output |> order_by(asc(output.item)) |> take(10)
 };
 ```
 
-query_remote! 的行级 filter 可用 is_some(a.optional_dimension) / is_none(a.optional_dimension) 筛选非 NULL / NULL，并可通过 && / || 与其他维度条件组合。使用模型发布的可空、可筛选维度成员；空字符串仍属于非 NULL，不等同于无数据。可空性包括字段声明和可选 Relation 引入的缺失；is_some/is_none 仅筛行，不自动改变输出字段类型，需要非空列时投影使用 not_none。这些条件在数据库内执行。可空标量参数可以保留身份下钻，例如 `filter((a.tenant_id == selected_tenant).unwrap_or!(False))`：Some(id) 精确匹配，None 配 False 返回空集，配 True 接受未知条件；None 不会取消筛选。参数保留业务类型及内部 codec。聚合度量阈值仍要求非空参数。
+query_remote! 的行级 filter 可用 is_some(a.optional_dimension) / is_none(a.optional_dimension) 筛选非 NULL / NULL，并可通过 && / || 与其他维度条件组合。使用模型发布的可空、可筛选维度成员；空字符串仍属于非 NULL，不等同于无数据。可空性包括字段声明和可选 Relation 引入的缺失；is_some/is_none 仅筛行，不自动改变输出字段类型，需要非空列时投影使用 not_none。这些条件在数据库内执行。可空标量参数可以保留身份下钻，例如 `filter((a.item_id == selected_id).unwrap_or!(False))`：Some(id) 精确匹配，None 配 False 返回空集，配 True 接受未知条件；None 不会取消筛选。参数保留业务类型及内部 codec。聚合度量阈值仍要求非空参数。
+
+已从关联目标节点取得类型化身份时，直接投影并复用该身份作为后续筛选参数，无需另查源节点的引用字段。例如 `data selected_id = map_opt(top, $.item_id);`，随后在已关联的 item 节点上使用 `filter((item.id == selected_id).unwrap_or!(False))`。源引用与目标身份由 Relation 连接，不自动获得相同的分组权限；可选关联未匹配时，多个不同源引用可能对应同一个空目标。分类、身份和记录粒度依据模型契约区分。
 
 远端查询中的参数表达式若不引用模型节点，会在本地计算并携带类型传入模型，例如 `a.ts >= to_datetime_utc(days[0].start.epoch_millis)`。引用模型列的时间转换由模型检查与执行。
 
@@ -72,21 +88,21 @@ query_remote! 的行级 filter 可用 is_some(a.optional_dimension) / is_none(a.
 
 可组合 filter、group_by、project、order_by、take、take_opt、distinct()。投影前的筛选针对源数据；投影后的筛选针对已聚合或已映射的结果，编译器保留这个顺序。新投影结果用新的 let 名称绑定。紧随投影的排序也可引用该阶段未输出的源字段。group_by 后必须 project 消费分组，分组投影使用 count/sum/avg/min/max。
 
-局部计划绑定不可变：`let g = r |> group_by({tenant: r.tenant});` 后，从 `g |> project({tenant: g.tenant, n: count()})` 消费分组结果。全表计数直接使用 `r |> project({n: count()})`。
+局部计划绑定不可变：`let g = r |> group_by({category: r.category});` 后，从 `g |> project({category: g.category, n: count()})` 消费分组结果。全表计数直接使用 `r |> project({n: count()})`。
 
 顶层 data 是数据节点；进入本地计划先 from(data)。联接、集合运算统一以管道传入左输入，参数引用已有右关系绑定，不用对象键声明别名。按身份求两组前十的交集可写：
 
 ```telora
 data overlap = query! {
-    let a = from(top_devices);
-    let b = from(top_interfaces);
-    let kept = a |> semi_join(b, a.device_id == b.device_id);
-    let output = kept |> project({device_id:a.device_id, name:a.name});
+    let a = from(left_rows);
+    let b = from(right_rows);
+    let kept = a |> semi_join(b, a.item_id == b.item_id);
+    let output = kept |> project({item_id:a.item_id, name:a.name});
     output |> order_by(asc(output.name))
 };
 ```
 
-semi_join/anti_join 用 EXISTS/NOT EXISTS 保留或排除左侧行，右侧重复不放大结果；上例继承 top_devices 的十行上界，无需重复 take。join/left_join 写为 a |> join(b, a.id == b.id)，可继续串接；最终 project 命名输出字段。union/union_all/intersect/except 写为 a |> intersect(b) 等，要求一致的字段名、业务类型及可空性。top_per({group:r.group},desc(r.value),n) 在各组内按指定顺序取前 N。
+semi_join/anti_join 用 EXISTS/NOT EXISTS 保留或排除左侧行，右侧重复不放大结果；上例继承 left_rows 的十行上界，无需重复 take。join/left_join 写为 a |> join(b, a.id == b.id)，可继续串接；最终 project 命名输出字段。union/union_all/intersect/except 写为 a |> intersect(b) 等，要求一致的字段名、业务类型及可空性。top_per({group:r.group},desc(r.value),n) 在各组内按指定顺序取前 N。
 
 本地、远端均支持一次调用中的多键排序：`output |> order_by(desc(output.rank), asc(output.name)) |> take(10)`，按参数顺序决定优先级，不需要拼接复合数字键。显示值相同不证明底层值完全相同；确定性破除并列可追加稳定身份键。
 
@@ -98,9 +114,9 @@ semi_join/anti_join 用 EXISTS/NOT EXISTS 保留或排除左侧行，右侧重�
 
 ```telora
 category: unwrap_or!(lookup(r.cls, [
-    {value: ic::DeviceClass::Lsw, label: "交换机"},
-    {value: ic::DeviceClass::Router, label: "路由器"},
-    {value: ic::DeviceClass::Ap, label: "无线接入点"}
+    {value: demo::Category::A, label: "甲类"},
+    {value: demo::Category::B, label: "乙类"},
+    {value: demo::Category::C, label: "丙类"}
 ]), "未标注分类")
 ```
 
@@ -153,8 +169,8 @@ query! 中先投影桶字段，再对该字段 group_by 并 project 聚合值。
 
 ```telora
 data rows = query_remote! {
-    let a = from(ic::device_kpi);
-    let grouped = a |> project({day: utc_bucket(a.device_kpi_ts_raw, CalendarUnit::Day), cpu: a.cpu_usage});
+    let a = from(demo::Samples);
+    let grouped = a |> project({day: utc_bucket(a.ts, CalendarUnit::Day), value: a.metric});
     grouped |> order_by(asc(grouped.day)) |> take(100)
 };
 ```
@@ -166,8 +182,8 @@ EpochMillis 先显式 to_datetime_utc，再 utc_bucket；远端转换源须为�
 ```telora
 data ctx = context! { tz: Context::ClientTz };
 data daily = query_remote! {
-    let a = from(ic::device_kpi);
-    let grouped = a |> project({day: calendar_bucket(a.device_kpi_ts_raw, CalendarUnit::Day, ctx.tz), cpu: a.cpu_usage});
+    let a = from(demo::Samples);
+    let grouped = a |> project({day: calendar_bucket(a.ts, CalendarUnit::Day, ctx.tz), value: a.metric});
     grouped |> order_by(asc(grouped.day)) |> take(100)
 };
 ```
@@ -178,9 +194,9 @@ data daily = query_remote! {
 
 树节点写 `Component(attr = value) [children]`。tree! 只组织文本、组件引用和条件；计算、映射和格式准备放在前序 data/do/query!。字段访问器写 $.field，由组件 data 的行 Schema 校验，不使用匿名函数。
 
-tree! 子节点可直接写字符串，例如 p ["统计窗口：", UseValue(ref = window_label)]。直接字符串包含数字时，check 成功并给出 warning：查询结果应通过 UseValue(...) 引用；确属固定文案时，用 Lit(value = "最近 3 天") 显式确认。Lit 只接受 value 属性中的静态字符串，不对其数字发出 warning。
+tree! 子节点可直接写字符串，例如 p ["统计窗口：", UseValue(ref = window_label)]。直接字符串包含数字时，check 给出 warning（不单独导致检查失败）：查询结果应通过 UseValue(...) 引用；确属固定文案时，用 Lit(value = "最近 3 天") 显式确认。Lit 只接受 value 属性中的静态字符串，不对其数字发出 warning。
 
-UseValue(ref = a.b.c) 只接受直接标量引用，字面量、调用、算术和空值默认值处理提前放在 data 中。先用 data highest_cpu = map_opt(highest,$.cpu); 准备可选标量，再用 UseValue(ref = highest_cpu) 展示。记录字段可先在 data/do 中绑定。条件写 `if condition [...] else [...]`；可选行写 `if let Some(row) = highest [...] else [...]`，行存在不代表其中字段非空，可继续解构。各分支均检查类型，执行时只渲染选中分支。
+UseValue(ref = a.b.c) 只接受直接标量引用，字面量、调用、算术和空值默认值处理提前放在 data 中。先用 data highest_value = map_opt(highest,$.value); 准备可选标量，再用 UseValue(ref = highest_value) 展示。记录字段可先在 data/do 中绑定。条件写 `if condition [...] else [...]`；可选行写 `if let Some(row) = highest [...] else [...]`，行存在不代表其中字段非空，可继续解构。各分支均检查类型，执行时只渲染选中分支。
 
 图表及 Table 直接内联在 Answer/Report 中，例如 `BarChart(data = rows,spec = {...})`。spec 不含 kind，组件标签决定种类。完整组件和配置见 oks://help/dari-figures.md。
 
@@ -194,7 +210,7 @@ Answer 的图表为 SVG 附件与 Markdown 图片，Report 内嵌图表；Table 
 
 ## 诊断
 
-dari_check 失败时返回 CheckFailed 文本，列出行列位置、相关声明与可确定的修复建议。一次收集多个独立错误，最多展示 20 条并提示剩余数量。类型及计划错误会说明期望与实际、错误原因和适用的修复方式。语法恢复以可靠的括号或声明边界为限；上游声明失败时，依赖它的内容等待修复后再检查。检查失败的稿件不会执行或发布结果。
+dari_check 失败时返回 CheckFailed 文本，列出行列位置、相关声明与可确定的修复建议。尽量一次收集独立错误和已发现的告警，分别列出，每类最多展示 20 条并提示剩余数量；告警不单独导致检查失败。类型及计划错误会说明期望与实际、错误原因和适用的修复方式。语法恢复以可靠的括号或声明边界为限；上游声明失败时，依赖它的内容等待修复后再检查。检查失败的稿件不会执行或发布结果。
 
 运行期输入、数据与展示错误采用 SubmitFailed 文本并定位负责节点。输入编码错误应修正输入；模型/context 版本变化后重新检查同一稿件；模型结果违背已证明契约属于实现问题，不靠放宽类型、删条件或伪造数据规避。
 

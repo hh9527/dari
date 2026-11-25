@@ -1,6 +1,6 @@
 import {Fault,type FaultDetails} from './syntax.ts';
 
-export type Diagnostic=FaultDetails&{at:number;message:string;stage:'syntax'|'type'|'model'|'runtime';asset?:string};
+export type Diagnostic=FaultDetails&{at:number;message:string;stage:'syntax'|'type'|'model'|'runtime';asset?:string;severity?:'error'|'warning'};
 const publicName=(text:string|undefined)=>text?.replace(/@local\/\d+\/([A-Za-z_][A-Za-z_0-9]*)/g,'$1');
 export function faultDiagnostic(error:Fault,stage:Diagnostic['stage'],asset?:string):Diagnostic {
  return {at:error.at,message:publicName(error.message)!,stage,asset:publicName(asset),...error.details,expression:publicName(error.details.expression),reason:publicName(error.details.reason),suggestion:publicName(error.details.suggestion)};
@@ -10,8 +10,8 @@ export class DiagnosticCollector {
  private entries:Diagnostic[]=[];
  report(d:Diagnostic){this.entries.push(d);}
  checkpoint(){return this.entries.length;}
- hasErrors(since=0){return this.entries.length>since;}
- list(){return [...new Map(this.entries.map(d=>[JSON.stringify([d.at,d.message,d.stage,d.asset]),d])).values()].sort((a,b)=>a.at-b.at||a.message.localeCompare(b.message));}
+ hasErrors(since=0){return this.entries.slice(since).some(d=>d.severity!=='warning');}
+ list(){return [...new Map(this.entries.map(d=>[JSON.stringify([d.at,d.message,d.stage,d.asset,d.severity??'error']),d])).values()].sort((a,b)=>a.at-b.at||a.message.localeCompare(b.message));}
 }
 export class UpstreamTypeUnavailable extends Error {}
 export function repairSuggestion(message:string):string|undefined {
@@ -43,12 +43,18 @@ export function renderDiagnostics(source:string,diagnostics:Diagnostic[],status=
   if(d.reason)lines.push('  原因：'+d.reason.replace(/[\r\n]+/g,' '));
   const suggestion=d.suggestion??repairSuggestion(d.message);if(suggestion)lines.push('  修复建议：'+suggestion);
  }
- if(diagnostics.length>20)lines.push('- 另有 '+(diagnostics.length-20)+' 条错误未列出；修复上述错误后再次检查');
+ if(diagnostics.length>20)lines.push('- 另有 '+(diagnostics.length-20)+' 条'+(status==='Warnings'?'告警':'错误')+'未列出；修复上述问题后再次检查');
  return lines.join('\n');
 }
 export class DiagnosticFailure extends Fault {
  diagnostics:Diagnostic[];
- constructor(source:string,diagnostics:Diagnostic[]){super(renderDiagnostics(source,diagnostics),diagnostics[0]?.at??0);this.diagnostics=diagnostics;}
+ constructor(source:string,diagnostics:Diagnostic[],warnings:Diagnostic[]=[]){
+  const errors=diagnostics.filter(d=>d.severity!=='warning');
+  const notices=new DiagnosticCollector();for(const d of [...diagnostics.filter(d=>d.severity==='warning'),...warnings])notices.report({...d,severity:'warning'});
+  const found=notices.list();
+  super(renderDiagnostics(source,errors)+(found.length?'\n\n'+renderDiagnostics(source,found,'Warnings'):''),errors[0]?.at??0);
+  this.diagnostics=[...errors,...found];
+ }
 }
 // Model diagnostics are data internally; only their messages belong in the public receipt.
 export function modelErrorText(value:unknown):string {

@@ -18,13 +18,13 @@ dari_kg_discover 按实体与属性定位；props 包含维度、度量和计数
 仅当 dari_vocab 已逐字返回下列英文词时，才可这样检索：
 
 ```js
-dari_kg_discover({queries:[{entity:"device",props:["cpu"]}]})
-dari_kg_discover({queries:[{entity:"alarm",props:["count"],values:["critical"]}]})
+dari_kg_discover({queries:[{entity:"item",props:["value"]}]})
+dari_kg_discover({queries:[{entity:"item",props:["count"],values:["active"]}]})
 ```
 
 `dari_kg_routes({from:"datasets/a",to:"datasets/b",via:["datasets/c"]})` 返回满足约束的最短路径集合。via 可省略，指定时按顺序经过这些 Dataset/Entity 根节点。回执包含方向、基数、完整连接键、角色 ID 和 guard；Entity 经承载其身份的 Dataset 进入路径。返回最多 20 条最短路径，超过时标记截断；没有路径时明确报告。via 表达业务必经节点。路径存在与聚合安全分别判断，后者依据具体度量约束。
 
-`dari_kg_info({ids:["datasets/device_kpi/measures/cpu_usage"]})` 批量读取 1..64 个精确知识点，未知 ID 逐点报告。每点给出业务定义和查询短名称；启用类型化源码契约时，还附带模型发布的精确符号、逻辑类型和关系信息。Field.roles 的 Appellation/Reference/Classification/Metric 分别是称谓、指代、分类、指标；筛选和聚合能力由 Dimension/Measure 声明决定。
+`dari_kg_info({ids:["datasets/items/measures/value"]})` 批量读取 1..64 个精确知识点，未知 ID 逐点报告。每点给出业务定义和查询短名称；启用类型化源码契约时，还附带模型发布的精确符号、逻辑类型和关系信息。Field.roles 的 Appellation/Reference/Classification/Metric 分别是称谓、指代、分类、指标；筛选和聚合能力由 Dimension/Measure 声明决定。
 
 ## 交付形式
 

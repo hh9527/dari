@@ -44,3 +44,21 @@ const unknown=failure(attributes);assert.equal(unknown.diagnostics.length,3);
 for(const name of ['title1','lang1','ref1'])assert.equal(unknown.diagnostics.find(d=>d.message.includes(name))!.at,attributes.indexOf(name));
 assert(!unknown.message.includes('Missing attribute'));assert(!unknown.message.includes('Unknown binding missing'));
 const invalidData='answer tree! {Answer [Table(data = 42)]};';assert.equal(failure(invalidData).diagnostics[0].at,invalidData.indexOf('42'));
+
+// A failed check retains independent warnings, including those preceding a bad plan.
+const combinedSource=`data input=table([{n:1}]);
+data warned=query! {let r=from(input).as!(r);r |> order_by(asc(r.n)) |> take(2)};
+data bad=query! {let g=group_by_identity(a);g};
+data other=unknown_value;
+answer tree! {Answer [p ["固定 3 项"]]};`;
+const combined=failure(combinedSource);
+const errors=combined.diagnostics.filter(d=>d.severity!=='warning');
+const warnings=combined.diagnostics.filter(d=>d.severity==='warning');
+assert(errors.some(d=>d.code==='group-by-identity-input'));
+assert(errors.some(d=>d.message.includes('unknown_value')));
+assert.deepEqual(warnings.map(d=>d.code).sort(),['let-alias-shadow','numeric-text']);
+assert.match(combined.message,/Warnings\n--------/);
+assert.match(combined.message,/rows \|> group_by_identity\(a\)/);
+assert.equal(errors.find(d=>d.code==='group-by-identity-input')!.at,combinedSource.indexOf('group_by_identity'));
+assert(!combined.message.includes('Relation a is not an input'));
+assert.equal(check('answer tree! {Answer [p ["固定 3 项"]]};').warnings[0].severity,'warning');

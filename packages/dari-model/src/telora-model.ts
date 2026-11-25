@@ -27,10 +27,12 @@ export async function openModel(artifact:string){
         if(response.error){if(Array.isArray(response.error))throw new ModelCheckFailure(response.error);throw Error(modelErrorText(response.error));}return response.value;
     }
     function scalar(name:string):Type{return sharedTypes[name]??{kind:'scalar',name};}
-    const types:Record<string,Type>=Object.create(null),businessTypes=new Map<string,Type>();
+    const types:Record<string,Type>=Object.create(null),businessTypes=new Map<string,Type>(),resolvingMeans=new Set<string>();
+    let meanResults:Record<string,{logical:string;storage:string}>;
     let codecs:Record<string,ValueCodec>,presentations:Record<string,Type["presentation"]>,semantics:Record<string,{identity?:string;semantic?:string}>;
     function business(logical:string,physical:string):Type{
         const key=logical+'@'+physical;
+        if(resolvingMeans.has(key))throw Error('Cyclic model mean result type '+key);
         const previous=businessTypes.get(key);
         if(previous)return previous;
         const base=scalar(physical);
@@ -42,7 +44,10 @@ export async function openModel(artifact:string){
         if(shared&&JSON.stringify(shared.codec?.operations)!==JSON.stringify(codec.operations))throw Error('Shared type calculation contract mismatch '+metadata!.identity);
         const type:Type=shared??(primary?{...base,codec}:{kind:'nominal',name:logical,inner:base,codec,semantic:metadata?.semantic??undefined,presentation:presentations?.[key]??undefined});
         const published={...type,modelLogical:logical};
-        businessTypes.set(key,published);return published;
+        businessTypes.set(key,published);
+        const mean=meanResults?.[key];
+        if(mean){resolvingMeans.add(key);try{published.meanResult=business(mean.logical,mean.storage);}finally{resolvingMeans.delete(key);}}
+        return published;
     }
     const started=performance.now();
     let contract:{contract_id:string;abi_version:string;datasets:WireDataset[];relations:Omit<RelationSymbol,'kind'>[];types:{name:string;logical:string;storage:string}[];codec_module:string};
@@ -51,7 +56,7 @@ export async function openModel(artifact:string){
         if(contract.abi_version!==MODEL_ABI_VERSION)throw Error('Unsupported model proof ABI '+contract.abi_version);
         // Trusted model build output; .dari text is never executed as JavaScript.
         const generated=await import('data:text/javascript;base64,'+Buffer.from(contract.codec_module).toString('base64'));
-        codecs=generated.createCodecs(primaryCodecs);presentations=generated.presentations;semantics=generated.semantics;
+        codecs=generated.createCodecs(primaryCodecs);presentations=generated.presentations;semantics=generated.semantics;meanResults=generated.meanResults??{};
         if(!presentations||!semantics)throw Error('Model must publish independent semantic and presentation contracts');
         for(const t of contract.types){
             types[t.name]=business(t.logical,t.storage);

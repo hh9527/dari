@@ -39,3 +39,5 @@ ports-test 验证独立检查/执行端、步骤回执、实现身份与共享�
 适配器通过 `ModelCheckFailure` 携带诊断数组，每项为 message 与可选 locs。locs 保留模型规则和输入 subject；临时输入 source 为 `<input>`，start/end.offset 为原始 DARI 的 UTF-8 字节偏移，line 为 0。
 
 引擎选择第一项有效输入 subject 为主范围，将独立诊断分别报告，保留所有来源及修复建议。无有效输入范围时使用已有语义诊断或查询位置，不把模型源码坐标误当 DARI 坐标。LSP 使用完整 UTF-16 范围，并在诊断 data.modelLocations 中保留后端来源。
+
+模型可以为业务类型发布 `meanResult: Type`，声明本地 `avg` 的结果类型。例如整数上报计数的均值返回对应浮点业务类型，`min/max` 保留原类型。模型适配器从生成 codec 模块的 `meanResults` 映射构建此契约，核心只消费类型映射，不依赖 ontology 或具体领域。检查与执行沿用结果类型的 codec，不把小数均值解码为整数。

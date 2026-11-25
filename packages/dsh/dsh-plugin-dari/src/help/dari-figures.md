@@ -30,14 +30,14 @@
 
 显式长表序列、Heatmap 和 RadarChart 按类别与序列坐标对齐，每个坐标须唯一；重复坐标报错，由输入计划明确聚合或补充身份。Sankey 和 NetworkGraph 逐行保留平行边，NetworkGraph 节点 id 须唯一。Histogram 的分桶计数、BoxPlot 的分布统计和显式堆叠按组件声明计算；除此之外，渲染层不自动聚合、去重、覆盖或挑选输入行。
 
-四种柱条图的 value_min 可设置轴基线，例如 99.0；条/柱上的标注仍是原始数值。空输入默认报错；显式 allow_no_data:True 接受空表并显示“无数据”。Table 同样支持 allow_no_data，保留表头。表格 labels 例如 {device:"设备",cpu:"CPU (%)"}，columns 决定列顺序，例如 [$.device,$.cpu]，也接受字符串列名。SVG 内嵌最终图表输入的 CSV 和 spec，报告保留这些信息。
+四种柱条图的 value_min 可设置轴基线，例如 99.0；条/柱上的标注仍是原始数值。空输入默认报错；显式 allow_no_data:True 接受空表并显示“无数据”。Table 同样支持 allow_no_data，保留表头。表格 labels 例如 {label:"类别",value:"数值"}，columns 决定列顺序，例如 [$.label,$.value]，也接受字符串列名。SVG 内嵌最终图表输入的 CSV 和 spec，报告保留这些信息。
 
 ## 柱条图：数据形态与可加和性
 
 | 目标 | 数据形态 | 映射配置 | 堆叠 |
 | --- | --- | --- | --- |
-| 同一指标按类别比较，如两周各告警级别的条数 | 长表：week、severity、count，每行一个周与级别组合 | GroupedBarChart 的 series:$.severity | 指标允许 Sum 时选择 StackedBarChart |
-| 多个独立指标并列，如每周 CPU、内存、在线率 | 宽表：week、cpu、memory、online，每行一周 | MultiBarChart 的 metrics 列表 | 独立指标只并列展示 |
+| 同一指标按类别比较，如两周各类别的条数 | 长表：week、category、count，每行一个周与类别组合 | GroupedBarChart 的 series:$.category | 指标允许 Sum 时选择 StackedBarChart |
+| 多个独立指标并列，如每周指标甲、乙、丙 | 宽表：week、metric_a、metric_b、metric_c，每行一周 | MultiBarChart 的 metrics 列表 | 独立指标只并列展示 |
 
 长表中所有 value 共用一个字段类型，series 列的取值决定分组。宽表中各数值列保留独立业务类型，列的身份决定序列。不能为适配长表而剥离不同指标的业务类型或强行 union_all。
 
@@ -45,17 +45,17 @@
 
 输入例如：
 
-| week | severity | count |
+| week | category | count |
 | --- | --- | --- |
-| 前一周 | 紧急 | 12 |
-| 前一周 | 重要 | 30 |
-| 后一周 | 紧急 | 15 |
-| 后一周 | 重要 | 24 |
+| 前一周 | 甲类 | 12 |
+| 前一周 | 乙类 | 30 |
+| 后一周 | 甲类 | 15 |
+| 后一周 | 乙类 | 24 |
 
 ```text
-StackedBarChart(data = severity_counts, spec = {
+StackedBarChart(data = category_counts, spec = {
   category:$.week,
-  series:$.severity,
+  series:$.category,
   value:$.count,
   mode:StackMode::Absolute
 })
@@ -67,7 +67,7 @@ GroupedBarChart 并列比较；StackedBarChart 的 mode 默认为 StackMode::Abs
 
 输入例如：
 
-| period | cpu | memory | online |
+| period | metric_a | metric_b | metric_c |
 | --- | --- | --- | --- |
 | 前一周 | 42.1 | 61.3 | 96.8 |
 | 后一周 | 45.2 | 59.6 | 97.1 |
@@ -78,9 +78,9 @@ MultiBarChart 使用 metrics 列表，每个数值列对应一个序列，各列
 answer tree! {Answer [MultiBarChart(data = weekly, spec = {
   category:$.period,
   metrics:[
-    {value:$.cpu,label:"CPU 平均使用率",unit:"%"},
-    {value:$.memory,label:"内存平均使用率",unit:"%"},
-    {value:$.online,label:"设备在线率",unit:"%"}
+    {value:$.metric_a,label:"指标甲",unit:"%"},
+    {value:$.metric_b,label:"指标乙",unit:"%"},
+    {value:$.metric_c,label:"指标丙",unit:"%"}
   ]
 })]};
 ```
@@ -95,8 +95,8 @@ LineChart 使用 series 列表（而非 metrics），例如：
 LineChart(data = daily, spec = {
   x:$.day,
   series:[
-    {value:$.cpu,label:"CPU 平均使用率",unit:"%"},
-    {value:$.memory,label:"内存平均使用率",unit:"%"}
+    {value:$.metric_a,label:"指标甲",unit:"%"},
+    {value:$.metric_b,label:"指标乙",unit:"%"}
   ]
 })
 ```
@@ -125,13 +125,13 @@ answer tree! { Answer [
     UseValue(ref = local_now),
     Table(data = daily, spec = { formats: { day: date_format } }),
     LineChart(data = daily, spec = {
-        x: $.day, value: $.cpu,
+        x: $.day, value: $.value,
         formats: { day: date_format }
     })
 ] };
 ```
 
-示例中的 daily 是先前取得的有界表，day 为 EpochMillis / DateTimeUtc / DateTimeTz，cpu 为数值指标。`formats` 的键为输入字段名，UseValue 的 `format` 使用同一配置。time_zone 接受非空 TimeZone（如 ctx.tz 或预先构造的 TimeZone），date_style 使用 DateStyle::Date / DateTime / Time。配置结构和枚举在检查期确定；time_zone 的类型在检查期校验，实际地区值来自本次执行的缓存数据节点。
+示例中的 daily 是先前取得的有界表，day 为 EpochMillis / DateTimeUtc / DateTimeTz，value 为数值指标。`formats` 的键为输入字段名，UseValue 的 `format` 使用同一配置。time_zone 接受非空 TimeZone（如 ctx.tz 或预先构造的 TimeZone），date_style 使用 DateStyle::Date / DateTime / Time。配置结构和枚举在检查期确定；time_zone 的类型在检查期校验，实际地区值来自本次执行的缓存数据节点。
 
 未指定格式时，EpochMillis / DateTimeUtc 明确按 UTC 展示；DateTimeTz 按自身地区展示。默认 DateTime 显示日期、时分秒、实际 UTC 偏移和地区名，以区分夏令时回拨的重复时刻。Date 只显示 YYYY-MM-DD；Time 只显示 HH:mm:ss。LocalDate 原样显示 YYYY-MM-DD，不接受 time_zone 或非 Date 的 date_style。空值保留为空，不伪造日期，不采用服务器默认时区。
 

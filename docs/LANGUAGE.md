@@ -15,6 +15,8 @@ query_remote! 在远端适配器执行，结果每次运行按节点缓存；直
 
 后置宏 `.as!(name)` 是表达式位置的绑定语法糖，遵循与 let 相同的顺序 shadow 规则，绑定后仍返回原计划。query! 和 query_remote! 的筛选、投影等计划都可用它命名，后续步骤使用新绑定。模型关系遍历中，`connect(Relation)` 从当前节点推导对端 Dataset，后置绑定命名新对端；连续 connect 从最新节点继续，表达式仍携带整个关系计划。let 绑定整个计划，成员投影可使用各节点名称。关系方向、可空性与行粒度由模型证明，自关联使用 `connect(Relation, from_node, to_node)`，两个节点分别用 from(Dataset) 声明，参数顺序对应 Relation 发布的 from/to；管道输入可以是任一端，方向不由节点变量名推测。
 
+源节点与处理后的计划推荐使用不同名称，例如 `let rows = from(Dataset).as!(a) |> filter(a.field < value);`。若写成 `let a = from(Dataset).as!(a) |> ...;`，外层 let 在右侧处理完后遮蔽同名后置绑定，检查器给出语义警告；后置绑定在右侧也没有引用时，警告同时标明未使用。该警告不限制独立 let 或管道步骤之间的正常 shadow。
+
 ```telora
 data rows = query_remote! {
     let linked = from(demo::device_kpi).as!(a)

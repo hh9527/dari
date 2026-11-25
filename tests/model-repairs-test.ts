@@ -1,0 +1,40 @@
+import assert from 'node:assert/strict';
+import {analyze,check} from '../packages/dari-core/src/compiler.ts';
+import {ModelCheckFailure} from '../packages/dari-core/src/model.ts';
+import {SourceOffsets} from '../packages/dari-core/src/source.ts';
+import {createFixtureModel} from '../packages/dari-core/src/testing/model.ts';
+const {model}=createFixtureModel();
+const refusal='dimension is not authorized for grouping';
+function rejected(source:string,message:string,expression?:string){
+ const span=expression?new SourceOffsets(source).toBytes(source.indexOf(expression),source.indexOf(expression)+expression.length):undefined;
+ const checker={...model,check_type(){throw new ModelCheckFailure([{message,locs:span?[{source:'<input>',start:{offset:span.start},end:{offset:span.end}}]:[]}]);}};
+ const result=analyze(source,checker);
+ assert.equal(result.diagnostics.length,1);
+ return result.diagnostics[0];
+}
+const ungrouped='data result=query_remote! {let a=from(demo::DeviceKpi);let output=a |> project({name:a.name,owner:a.tenant_id,cpu:a.cpu_usage});output |> order_by(desc(output.cpu)) |> take(5)};answer tree! {Answer []};';
+const missing=rejected(ungrouped,refusal,'a.tenant_id');
+assert.equal(missing.code,'model-grouping');assert.equal(missing.expression,'a.tenant_id');
+assert.match(missing.suggestion!,/group_by_identity\(a\)/);
+assert.match(missing.suggestion!,/源节点的引用字段不自动成为目标身份/);
+assert.equal(missing.at,ungrouped.indexOf('a.tenant_id'));
+const grouped=ungrouped.replace('let output=a |>','let grouped=a |> group_by_identity(a);let output=grouped |>');
+const invalid=rejected(grouped,refusal,'a.name');
+assert.equal(invalid.code,'model-grouping');assert.match(invalid.reason!,/已经按身份分组/);
+assert.match(invalid.suggestion!,/保留记录粒度/);
+assert(!invalid.suggestion!.includes('group_by_identity(a)'),'Do not advise repeating an existing grouping');
+const optional='data picked:Option(demo::TenantId)=None;data result=query_remote! {let a=from(demo::DeviceKpi);let filtered=a |> filter(a.name == "A") |> filter(a.tenant_id == picked);let output=filtered |> project({name:a.name});output |> order_by(asc(output.name)) |> take(5)};answer tree! {Answer []};';
+const parameter=rejected(optional,'Nullable filter parameter requires explicit unwrap_or!(comparison, False) or True','a.tenant_id == picked');
+assert.equal(parameter.code,'model-optional-predicate');
+assert.match(parameter.suggestion!,/unwrap_or!\(a.tenant_id == picked, False\)/);
+assert(!parameter.suggestion!.includes('a.name'));
+assert.equal(parameter.at,optional.indexOf('a.tenant_id'));
+const bool=rejected(optional,'Predicate requires Bool; got Option(Bool)','a.tenant_id == picked');
+assert.equal(bool.code,'model-optional-predicate');assert.match(bool.reason!,/可空参数/);
+// Context diagnoses discriminate Table from an already optional row.
+const table=analyze('data rows=table([{n:1}]);data picked=take_opt(rows);answer tree! {Answer []};').diagnostics[0];
+assert.equal(table.code,'plan-operator-context');assert.match(table.suggestion!,/from\(rows\)/);
+const row=analyze('data input=table([{n:1}]);data rows=query! {from(input) |> take_opt()};data picked=take_opt(rows);answer tree! {Answer []};').diagnostics[0];
+assert.equal(row.code,'plan-operator-context');assert.match(row.reason!,/已经是可选单行/);assert.match(row.suggestion!,/map_opt\(rows, \$\.field\)/);
+assert.throws(()=>check('data picked=take_opt();answer tree! {Answer []};'),/requires a query pipeline context/);
+console.log('Model repairs: located grouping guidance, stable identity versus reference, explicit nullable comparison and plan-context suggestions passed');

@@ -1,4 +1,5 @@
 import {Fault,type Node} from './syntax.ts';
+import type {Diagnostic} from './diagnostics.ts';
 
 // Resolve lexical relation bindings to a DAG of ordinary typed query/select plans.
 // This phase resolves names and input dependencies; the compiler/model still owns typing.
@@ -18,7 +19,7 @@ const joins=new Set(['join','left_join','semi_join','anti_join']);
 
 // Give every lexical binding its own identity before plans are expanded or
 // model nodes are hoisted. Resolve each RHS before publishing its new name.
-export function resolvePlanNames(block:Node):Node{
+export function resolvePlanNames(block:Node,report?:(diagnostic:Diagnostic)=>void):Node{
  if(!['query','select'].includes(block.k)||block.loweredBindings||block.resolvedNames)return block;
  const names=new Map<string,string>();let next=0;
  const bind=(name:string)=>{const id='@local/'+next+++'/'+name;names.set(name,id);return id;};
@@ -36,7 +37,29 @@ export function resolvePlanNames(block:Node):Node{
   if(n.k==='array')return {...n,items:n.items.map(expression)};
   return n;
  }
- const bindings=block.bindings.map((b:Node)=>{const value=expression(b.value);return {...b,value,displayName:b.name,name:bind(b.name)};});
+ const bindings=block.bindings.map((b:Node)=>{
+  const value=expression(b.value);
+  if(report){
+   const aliases:Node[]=[],used=new Set<string>();
+   function scan(n:Node){
+    if(n.k==='alias'&&n.displayName===b.name)aliases.push(n);
+    if(n.k==='ref')used.add(n.path[0]);
+    for(const v of Object.values(n)){
+     if(Array.isArray(v)){for(const item of v)if(item&&typeof item==='object'&&'k'in item)scan(item);}
+     else if(v&&typeof v==='object'&&'k'in v)scan(v as Node);
+    }
+   }
+   scan(value);
+   for(const alias of aliases){
+    const unused=!used.has(alias.name);
+    report({at:alias.nameAt??alias.at,stage:'type',code:'let-alias-shadow',
+     message:'let '+b.name+' shadows .as!('+b.name+') after its initializer'+(unused?'; the postfix binding is unused':''),
+     reason:'let 在右侧计划处理完成后发布新绑定，遮蔽右侧同名的 .as! 绑定；后续 '+b.name+' 指向整个计划的当前结果，可能已是其他节点',
+     suggestion:'源节点与计划使用不同名称，例如 let rows = from(...).as!('+b.name+') |> filter('+b.name+'.field < value); 若只需源节点，写 let '+b.name+' = from(...);'});
+   }
+  }
+  return {...b,value,displayName:b.name,name:bind(b.name)};
+ });
  const start=expression(block.start),steps=block.steps.map(expression);
  return {...block,bindings,start,steps,resolvedNames:true};
 }
@@ -84,6 +107,10 @@ export function lowerPlanBindings(declaration:Node,fresh:()=>string,globals:Read
  }
  function groupStart(n:Node):never{
   const input=n.args[0],name=input?.k==='ref'?(input.displayPath??input.path).join('.'):'rows';
+  if(n.name==='group_by_identity')throw new Fault('group_by_identity requires a pipeline input',n.at,{
+   code:'group-by-identity-input',reason:'group_by_identity 是计划算子；完整输入计划放在 |> 左侧，括号内指定该计划中的身份节点',
+   suggestion:'写为 let grouped = rows |> group_by_identity('+name+');，随后从 grouped |> project({...}) 继续；rows 是输入计划，'+name+' 是 from/connect 绑定的节点'
+  });
   throw new Fault('group_by requires a pipeline input',n.at,{
    code:'group-by-input',reason:'group_by 是关系计划算子；输入关系放在 |> 左侧，括号内只放分组键对象',
    suggestion:'按键分组写为 '+name+' |> group_by({key: '+name+'.field})，随后 |> project({...})；全表计数直接写 '+name+' |> project({n: count()})，无需 group_by({})'
@@ -180,7 +207,7 @@ export function lowerPlanBindings(declaration:Node,fresh:()=>string,globals:Read
  function expression(value:Node):Relation{
   const part=parts(value),binding=part.start.k==='alias'?part.start:undefined;
   const start=binding?.value??part.start,steps=part.steps;let relation:Relation;
-  if(start.k==='call'&&start.name==='group_by')groupStart(start);
+  if(start.k==='call'&&['group_by','group_by_identity'].includes(start.name))groupStart(start);
   if(start.k==='alias')relation=expression(start);
   else if(start.k==='ref'&&start.path.length===1)relation=useRelation(start.path[0],start);
   else if(start.k==='call'&&start.name==='from'&&block.k==='query'){
@@ -206,7 +233,7 @@ export function lowerPlanBindings(declaration:Node,fresh:()=>string,globals:Read
  for(const binding of block.bindings){
   const {start}=parts(binding.value);
   const plan= binding.value.k==='pipeline'||start.k==='alias'||start.k==='call'&&['from','project','pair',...joins,...sets].includes(start.name)||start.k==='ref'&&locals.get(start.path[0])?.kind==='relation';
-  if(!plan){if(start.k==='call'&&start.name==='group_by')groupStart(start);const name=emit(rewrite(binding.value,new Map()),binding.name);definitions.at(-1)!.editorBinding=binding;locals.set(binding.name,{kind:'value',name});continue;}
+  if(!plan){if(start.k==='call'&&['group_by','group_by_identity'].includes(start.name))groupStart(start);const name=emit(rewrite(binding.value,new Map()),binding.name);definitions.at(-1)!.editorBinding=binding;locals.set(binding.name,{kind:'value',name});continue;}
   const relation=expression(binding.value);
   relation.scope.set(binding.name,relation.row);
   observe(relation,binding);locals.set(binding.name,relation);

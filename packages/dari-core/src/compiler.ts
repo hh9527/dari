@@ -14,7 +14,7 @@ import {MAX_RESULT_ROWS,MAX_PRESENTATION_ROWS,type Plan,type ResultContract,type
 export type {Plan} from './plan.ts';
 import {primaryCodecs} from './primary-codecs.ts';
 import type {HostPort} from './host.ts';
-export type Type={kind:string;name?:string;modelLogical?:string;displayName?:string;semantic?:string;presentation?:{multiplier:number;suffix:string;precision?:number};inner?:Type;fields?:Record<string,Type>;input?:Type;output?:Type;codec?:import('./model.ts').ValueCodec};
+export type Type={kind:string;name?:string;modelLogical?:string;displayName?:string;semantic?:string;presentation?:{multiplier:number;suffix:string;precision?:number};meanResult?:Type;inner?:Type;fields?:Record<string,Type>;input?:Type;output?:Type;codec?:import('./model.ts').ValueCodec};
 export type Binding={internal?:boolean;type:Type;ast:Node;kind:string;plan?:Plan;modelPlan?:unknown;parameters?:Node[];result?:ResultContract};
 export type CheckedReference={at:number;path:string[];type:Type;rootType:Type;symbol?:string};
 export type CheckedTreeNode={at:number;name:string;contract?:ComponentContract;attributes:{at:number;name:string;type?:Type}[]};
@@ -91,12 +91,12 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
   const fields=node.k==='object'?Object.fromEntries(node.fields.map((f:Node)=>[f.name,sourceOffsets.toBytes(f.at,f.keyEnd??f.at+f.name.length)]).filter((entry:any)=>entry[1])):undefined;
   return {span,fields};
  }
- function modelFailure(error:unknown,intent:IntentType,query:Node):Fault{
+ function modelFailure(error:unknown,intent:IntentType,query:Node,focus?:{start:number;end:number}):Fault{
   const modelDiagnostics=(error as ModelCheckFailure|undefined)?.diagnostics;
   if(error instanceof Error&&Array.isArray(modelDiagnostics)&&modelDiagnostics.every(d=>typeof d.message==='string')){
    const findings=modelDiagnostics.map(d=>{
     const valid=(Array.isArray(d.locs)?d.locs:[]).flatMap(loc=>loc?.source==='<input>'&&loc.start&&loc.end?(()=>{const range=sourceOffsets.toChars({start:loc.start.offset,end:loc.end.offset});return range?[range]:[];})():[]);
-    const fallback=modelFailure(new Error(d.message),intent,query);
+    const fallback=modelFailure(new Error(d.message),intent,query,valid[0]);
     return {at:valid[0]?.start??fallback.at,...fallback.details,end:valid[0]?.end,message:fallback.message,stage:'model' as const,expression:valid[0]?source.slice(valid[0].start,valid[0].end):fallback.details.expression,related:d.locs};
    });
    if(findings.length)return new DiagnosticFailure(source,findings);
@@ -116,6 +116,24 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    if(node)for(const member of Object.values(node.dataset.members))names.set(node.id+'_'+member.id,alias+'.'+member.symbol);
   }
   const message=modelErrorText((error as Error).message).replace(/\b(?:__node_\d+|node_\d+|r\d+)(?:_[A-Za-z0-9_]+)?\b/g,name=>names.get(name)??name);
+  const located=(expr:QueryExprType)=>{
+   const node=modelLocations.get(expr);if(!node||!focus)return false;
+   return (node.sourceStart??node.at)<=focus.start&&(node.end??node.at)>=focus.end;
+  };
+  const hint=(expr:QueryExprType)=>{const node=modelLocations.get(expr);return node?(node.end!==undefined?source.slice(node.sourceStart??node.at,node.end):expressionHint(node)):expr.kind==='member'?(names.get(intent.nodes[expr.node].id)??intent.nodes[expr.node].dataset.symbol)+'.'+expr.member.symbol:'condition';};
+  if(/dimension is not authorized for grouping/.test(message)){
+   const members=intent.steps.flatMap(step=>step.kind==='project'&&step.value.kind==='record'?Object.values(step.value.fields).flatMap(expr=>expr.kind==='call'&&expr.name==='not_none'?expr.args:[expr]).filter(expr=>expr.kind==='member'&&expr.member.kind==='dimension'):[]);
+   const target=members.find(located)??(members.length===1?members[0]:undefined);
+   if(target?.kind==='member'){
+    const alias=hint(target).split('.')[0],grouped=intent.steps.some(step=>step.kind==='group_by_identity'&&step.node===target.node);
+    return new Fault(message,modelLocations.get(target)?.at??query.at,{stage:'model',code:'model-grouping',expression:hint(target),reason:grouped?'该节点已经按身份分组，但模型未声明该身份能决定此字段；记录属性不自动成为身份属性':'该字段不是已发布的分类分组键，当前身份分组也未证明它唯一确定',suggestion:grouped?'使用该身份决定的已发布属性；若需要记录级字段，保留记录粒度或选择该字段允许的聚合，不任取一条记录':'若按 '+alias+' 的身份统计，在完整关联与筛选计划上写 let grouped = rows |> group_by_identity('+alias+');，再从 grouped |> project({...}) 继续；只有身份决定的属性可随同投影。已关联目标节点时优先使用其类型化身份；源节点的引用字段不自动成为目标身份的分组键'});
+   }
+  }
+  if(/Predicate requires Bool; got Option\(Bool\)|Nullable filter parameter requires/.test(message)){
+   const filters=intent.steps.flatMap(step=>step.kind==='filter'?[step.predicate]:[]);
+   const target=filters.find(located)??(filters.length===1?filters[0]:undefined),condition=target?hint(target):'condition';
+   return new Fault(message,target?modelLocations.get(target)?.at??query.at:query.at,{stage:'model',code:'model-optional-predicate',expression:target?condition:undefined,reason:'可空字段、可选关联或可空参数使比较结果为 Option(Bool)，筛选需要明确的 Bool',suggestion:'空值按不满足处理时写 filter(unwrap_or!('+condition+', False))；确需接受未知条件时选择 True。保留类型化身份参数，不改为名称匹配；聚合阈值参数仍须非空'});
+  }
   function mismatch(expr:QueryExprType):Fault|undefined{
    if(expr.kind!=='binary')return;
    if(expr.left.kind==='member'&&(expr.right.kind==='literal'||expr.right.kind==='parameter')){
@@ -268,7 +286,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    if(n.name==='input')err(n,'input() requires an explicitly typed declaration: data request: Params = input();');
    if(['count','sum','avg','min','max'].includes(n.name)){
     if(!aggregate)err(n,'Aggregate only allowed in grouped projection');if(n.name==='count'){if(n.args.length>1)err(n,'count accepts zero or one column');if(n.args.length)infer(n.args[0],env);return scalar('Int');}
-    if(n.args.length!==1)err(n,'Aggregate requires one column');const t=present(infer(n.args[0],env));if(!numeric(t))err(n,'Aggregate requires numeric column');calculation(n,t,({sum:'Sum',avg:'Mean',min:'Min',max:'Max'} as Record<string,string>)[n.name]);return optional(n.name==='avg'&&t.kind!=='nominal'?scalar('Float'):t);
+    if(n.args.length!==1)err(n,'Aggregate requires one column');const t=present(infer(n.args[0],env));if(!numeric(t))err(n,'Aggregate requires numeric column');calculation(n,t,({sum:'Sum',avg:'Mean',min:'Min',max:'Max'} as Record<string,string>)[n.name]);if(n.name==='avg'&&t.kind==='nominal'&&storage(t).type==='Int'&&!t.meanResult)err(n,'Nominal integer avg requires a model-declared floating meanResult',{code:'mean-result-type',reason:'整数业务类型不能保证均值仍为整数',suggestion:'由模型发布对应的浮点业务均值类型；不要剥离业务类型来绕过检查'});if(n.name==='avg'&&t.meanResult&&(!numeric(t.meanResult)||storage(t.meanResult).type!=='Float'||storage(t.meanResult).nullable))err(n,'Model meanResult requires a non-optional floating type',{code:'mean-result-type',reason:'均值可以包含小数；模型应提供浮点业务类型，聚合器统一处理空集',suggestion:'修正模型发布的 meanResult 类型，保留业务身份，不将结果降为原始数值'});return optional(n.name==='avg'?(t.meanResult??(t.kind==='nominal'?t:scalar('Float'))):t);
    }
    if(n.name==='unwrap_or'){
     if(n.args.length!==2)err(n,'unwrap_or! requires value and fallback');
@@ -286,6 +304,14 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    if(t?.kind==='nominal'&&n.args.length===1){
     if(t.codec?.variants)err(n,'Use a static enum variant: '+n.name+'::Variant');
     else assign(n.args[0],t.inner!,env);return t;
+   }
+   if(['take_opt','take','filter','project','order_by','group_by','group_by_identity','distinct','from','join','left_join','semi_join','anti_join','union','union_all','intersect','except'].includes(n.name)){
+    const input=n.args[0],name=input?(input.end!==undefined?source.slice(input.sourceStart??input.at,input.end):expressionHint(input)??'prepared'):'prepared';
+    if(n.name==='take_opt'&&input){
+     const t=infer(input,env,aggregate,groupKeys);
+     if(t.kind==='option'&&t.inner?.kind==='schema')err(n,'take_opt input is already an optional row',{code:'plan-operator-context',reason:name+': '+show(t)+' 已经是可选单行结果，无需再次取首行',suggestion:'直接引用 '+name+'；读取列用 map_opt('+name+', $.field)，或在 tree! 中用 if let Some(row) 解构'});
+    }
+    err(n,n.name+' requires a query pipeline context',{code:'plan-operator-context',reason:n.name+' 是关系计划算子，不是顶层标量函数',suggestion:n.name==='take_opt'?'表结果写为 query! { let rows = from('+name+'); rows |> take_opt() }；若输入可能多于一行，先按任务口径 order_by，再 take_opt()':'在 query! 或 query_remote! 内按相应算子契约组合计划；顶层数据先通过 from(data) 引入，例如 query! { let rows = from(prepared); rows |> project({value:rows.value}) }'});
    }
    err(n,'Unknown built-in '+n.name+'; arbitrary function execution is unavailable');
   }
@@ -666,7 +692,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
   function checkChild(c:Node,scope:Record<string,Type>){try{checkChildValue(c,scope);}catch(error){finding(error);invalidChild=true;}}
   function checkChildValue(c:Node,scope:Record<string,Type>){
    if(c.k==='literal'){
-    if(typeof c.value==='string'&&/\p{N}/u.test(c.value))p.warnings.push({at:c.at,asset,stage:'type',code:'numeric-text',message:'文本包含数字，请确认是否为查询结果',suggestion:'数据值使用 UseValue(ref = ...) 引用；固定文案使用 Lit(value = '+JSON.stringify(c.value)+') 显式声明'});
+    if(typeof c.value==='string'&&/\p{N}/u.test(c.value))p.warnings.push({at:c.at,asset,stage:'type',severity:'warning',code:'numeric-text',message:'文本包含数字，请确认是否为查询结果',suggestion:'数据值使用 UseValue(ref = ...) 引用；固定文案使用 Lit(value = '+JSON.stringify(c.value)+') 显式声明'});
     return;
    }
    if(c.k==='iflet'){const t=infer(c.test,scope);if(t.kind!=='option')err(c.test,'if let Some requires Option(T)');const nested={...scope,[c.name]:t.inner!};c.yes.forEach((child:Node)=>checkChild(child,nested));c.no.forEach((child:Node)=>checkChild(child,scope));return;}
@@ -683,7 +709,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
  for(let declarationIndex=0;declarationIndex<declarations.length;declarationIndex++){
   const d=declarations[declarationIndex];
   asset=d.owner?d.owner+(d.label?' / '+d.label:''):d.name;
-  if(d.k==='declaration'){if(d.value.k==='query')d.remoteBoundary=true;d.value=resolvePlanNames(d.value);}
+  if(d.k==='declaration'){if(d.value.k==='query')d.remoteBoundary=true;d.value=resolvePlanNames(d.value,warning=>p.warnings.push({...warning,asset,severity:'warning'}));}
   if(d.k==='declaration'&&d.value.k==='query'){
    try{if(!model)err(d.value,'Remote query proof requires a model integration',{code:'model-unavailable',reason:'远端结果类型尚未由模型证明；独立本地节点仍会继续检查',suggestion:'配置实现 ModelCheckPort 的集成模块后完成远端证明'});d.value=lowerNodeBindings(d.value,model);}catch(error){finding(error);failed.add(d.name);continue;}
   }
@@ -770,7 +796,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
   if(d.annotation){const wanted=type(d.annotation);if(!compatible(wanted,t!))err(d,'Declaration annotation expects '+show(wanted)+'; got '+show(t!),mismatchDetails(wanted,t!));}if(d.editorBinding){const b=d.editorBinding;p.references.push({at:b.nameAt??b.at,path:[b.displayName??b.name],type:t!,rootType:t!});}p.bindings.set(d.name,{internal:!!d.internal,type:t!,ast:d.value,kind,plan,modelPlan:modelShape?.plan,parameters,result:plan?.result??(modelShape?{element:modelShape.element,container:t!.kind==='option'?'option':'table',maxRows:modelShape.maxRows,ordering:modelOrdering}:kind==='literal_table'?{element:t!.inner!,container:'table',maxRows:d.value.args[0].items.length,ordering:[]}:kind==='source'?{element:t!.inner!,container:'table',ordering:[]}:undefined)});
   }catch(error){finding(error);if(!p.bindings.has(d.name)&&!p.types.has(d.name))failed.add(d.name);}
  }
- if(diagnostics.hasErrors()&&!partial)throw new DiagnosticFailure(source,diagnostics.list());
+ if(diagnostics.hasErrors()&&!partial)throw new DiagnosticFailure(source,diagnostics.list(),p.warnings);
  if(p.bindings.get(p.answer)?.type.kind!=='answer'&&!diagnostics.hasErrors())diagnostics.report(faultDiagnostic(new Fault('One answer tree! { Answer [...] }; is required',source.length),'type'));
- if(diagnostics.hasErrors()&&!partial)throw new DiagnosticFailure(source,diagnostics.list());return p;
+ if(diagnostics.hasErrors()&&!partial)throw new DiagnosticFailure(source,diagnostics.list(),p.warnings);return p;
 }
