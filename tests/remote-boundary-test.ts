@@ -39,7 +39,8 @@ const answer=(body:string)=>'answer tree! {Answer ['+body+']};';
 {
  const f=fixture(Array.from({length:500},(_,i)=>sample(String(i))));try{
   assert.throws(()=>check(remote(501)+answer('"unused"'),f.model),/500|bound/);
-  assert.throws(()=>check(remote(500)+answer('Table(data=raw)'),f.model),/110/);
+  assert.throws(()=>check(remote(500)+answer('Table(data=raw)'),f.model),/Table input data \(raw\).*110[\s\S]*已证明至多 500 行[\s\S]*调整远端节点 raw/);
+  assert.equal(check(remote(50)+answer('Table(data=raw)'),f.model).bindings.get('raw')?.result?.maxRows,50);
   const r=f.run(remote(500)+`data rows=query! {from(raw).as!(r) |> project({id:r.id}).as!(out) |> take(110)};`+answer('Table(data=rows)'));assert.equal(r.values.rows.length,110);assert.equal(f.trace.calls,1);assert.equal(f.trace.imports,1);f.clean();
   assert.throws(()=>f.run(remote(499)+`data rows=query! {from(raw).as!(r) |> project({id:r.id}).as!(out) |> take(1)};`+answer('Table(data=rows)')),/exceeds published row bound/);assert.equal(f.trace.imports,1);f.clean();
  }finally{f.db.close();}

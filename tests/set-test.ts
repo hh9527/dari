@@ -26,3 +26,18 @@ assert.equal(dedup.values.rows.length,3);
 assert.throws(()=>check(prefix+'answer tree! { Answer [Table(data = a)]};',undefined,{allowTestSources:true}),/proven bound/);
 assert.equal(run('data empty=is_empty(a);answer tree! { Answer [UseValue(ref = empty)]};').answer,'*false*');
 db.close();console.log('unmaterialized SQL DAG: union/all/intersect/except, semi/anti joins, distinct, partition Top-N and delivery bounds passed');
+
+const enumModel = {
+ contractId:'finite-groups', datasets:{}, check_type(){return assert.fail('Local plans need no model proof');},
+ types:{'demo::Status':{kind:'nominal', name:'demo::Status', inner:{kind:'scalar',name:'String'},
+  codec:{variants:['Up','Down','Idle','Unknown'],parse:(v:unknown)=>v,encode:(v:unknown)=>v,decode:(v:unknown)=>v}}},
+};
+const grouped = (source:string, keys:string) => check(
+ 'type R=Schema({status:Option(demo::Status),flag:Bool,name:String});'+source+
+ 'data result=query! {let r=from(input);let g=r |> group_by('+keys+');g |> project({n:count()})};'+
+ 'answer tree! {Answer []};',enumModel,{allowTestSources:true},
+).bindings.get('result')!.result!.maxRows;
+const tableSource='data input:Table(R)=source("groups");';
+assert.equal(grouped(tableSource,'{status:r.status}'),5);
+assert.equal(grouped(tableSource,'{status:r.status,flag:r.flag}'),10);
+assert.equal(grouped(tableSource,'{status:r.status,name:r.name}'),undefined);
