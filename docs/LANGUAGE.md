@@ -118,6 +118,8 @@ if let Some(name) = value 在 tree! 分支中收窄 Option(T) 为 T。name 只�
 
 let 和后置 .as! 声明关系名称，算子参数引用已有绑定，不用对象键模拟别名。join、left_join、semi_join、anti_join 写为 left |> join(right, condition)；union、union_all、intersect、except 写为 left |> intersect(right)。可以继续串接关系算子；最终通过 project 为联接输出命名。对象只表达字段结构，例如 project({...}) 和 group_by({...})。
 
+本地分组可以由封闭枚举或 Bool 键证明结果上界。可空键额外计入一个 NULL 组。多个有限分组键取基数乘积，并与已有输入上界取较小值。远端分组上界由模型证明。
+
 query_remote! 的两期对齐写为 left |> pair(right)。普通关联使用 input |> connect(Relation).as!(peer)，显式端点使用 input |> connect(Relation, from_node, to_node)，后者也可用 .as! 命名当前端点。Relation 的 from/to 顺序决定显式端点顺序。没有隐式 out；投影结果用 let result = ... 或 .as!(result) 命名，后续引用 result.field。显式 let out 是普通绑定。
 
 ```text

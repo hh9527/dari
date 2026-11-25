@@ -393,7 +393,17 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    group_by(input,step){
     table(input,step);if(step.args.length!==1||step.args[0].k!=='object')err(step,'group_by requires one key record',{code:'group-by-keys',reason:'输入关系由 |> 提供；group_by 的唯一参数是具名分组键对象',suggestion:'写为 rows |> group_by({key: rows.field}) |> project({...})；全表计数使用 rows |> project({n: count()})'});
     const keys=fieldsOf(step.args[0]).map(f=>{if(!key(f.value))err(f,'Grouping requires direct field references');infer(f.value,input.scope);return f.value;});
-    return node('group',input,{...input.result,container:'grouped',ordering:[]},{keys});
+    let maxRows=input.result.maxRows;
+    let combinations=1;
+    for(const key of keys){
+     const type=key.resolvedType as Type;
+     const base=present(type);
+     const size=base.codec?.variants?.length??(base.kind==='scalar'&&base.name==='Bool'?2:undefined);
+     if(!size){combinations=Infinity;break;}
+     combinations*=size+(type.kind==='option'?1:0);
+    }
+    if(keys.length&&Number.isSafeInteger(combinations))maxRows=Math.min(maxRows??combinations,combinations);
+    return node('group',input,{...input.result,maxRows,container:'grouped',ordering:[]},{keys});
    },
    project(input,step){
     if(input.result.container==='option')err(step,'project requires Table(Schema), got Option(Schema)',{code:'table-required',reason:'take_opt() 已将表变为可选单行，不能再作为多行关系计划处理',suggestion:'若还需表处理，保留 take(n) 的 Table 结果；若要展示可选单行，使用 map_opt 或 tree! 中的 if let Some'});
