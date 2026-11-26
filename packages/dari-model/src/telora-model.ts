@@ -11,7 +11,7 @@ import {primaryCodecs} from '@local/dari-core/codecs';
 
 type WireMember={id:string;symbol:string;kind:'dimension'|'measure';logical:string;storage:string;nullable:boolean};
 type WireDataset={id:string;symbol:string;members:WireMember[]};
-type WireTemplate={container:'table'|'option';receipt:ProofReceipt;sql:string;total_sql?:string|null;bindings:any[];columns:(ResultColumn&{logical:string})[];max_rows:number|null};
+type WireTemplate={pivot?:import('../../dari-core/src/model.ts').PivotOptions|null;container:'table'|'option';receipt:ProofReceipt;sql:string;total_sql?:string|null;bindings:any[];columns:(ResultColumn&{logical:string})[];max_rows:number|null};
 export async function openModel(artifact:string){
     accessSync(artifact);
     const buffer=new SharedArrayBuffer(8+8*1024*1024),state=new Int32Array(buffer,0,2),bytes=new Uint8Array(buffer,8);
@@ -92,7 +92,7 @@ export async function openModel(artifact:string){
             stats.checkMs.push(performance.now()-start);
             const fields:Record<string,Type>=Object.create(null);
             for(const c of checked.columns){const t=business(c.logical,c.type);fields[c.name]=c.nullable?{kind:'option',inner:t}:t;}
-            return {element:{kind:'schema',fields},container:checked.container,receipt:checked.receipt,hasTotal:typeof checked.total_sql==='string'&&checked.container==='table',maxRows:checked.max_rows??undefined,plan:{checked,constants:encoded.constants,parameterTypes:encoded.parameterTypes}};
+            return {element:{kind:'schema',fields},container:checked.container,receipt:checked.receipt,hasTotal:typeof checked.total_sql==='string'&&checked.container==='table',maxRows:checked.pivot?.max_rows??checked.max_rows??undefined,pivot:checked.pivot??undefined,plan:{checked,constants:encoded.constants,parameterTypes:encoded.parameterTypes}};
         }
     };
     function bind(plan:unknown,parameters:unknown[],total=false){
@@ -111,7 +111,7 @@ export async function openModel(artifact:string){
                 const unwrapped=value?.tag==='None'?null:value?.tag==='Some'?value.value:value;
                 bindings.push(parameter!==undefined&&unwrapped!==null&&type?.codec?type.codec.encode(unwrapped):unwrapped);return '?';
             });
-            return {sql,bindings,columns:checked.columns.map(({logical,...column})=>column),max_rows:checked.max_rows??undefined};
+            return {sql,bindings,columns:checked.columns.map(({logical,...column})=>column),max_rows:checked.pivot?.max_rows??checked.max_rows??undefined,pivot:checked.pivot??undefined};
     }
     return {model,bind,stats,contract,codecs,codecModuleSource:contract.codec_module,
         checkWire(intentJson:string):WireTemplate{return request('ontology/model',{method:'transform',input:{intent:JSON.parse(intentJson)}});},

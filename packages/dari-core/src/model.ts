@@ -30,7 +30,9 @@ export type QueryExprType =
     {kind:'call';name:string;args:QueryExprType[]} |
     {kind:'binary';op:string;left:QueryExprType;right:QueryExprType} |
     {kind:'unary';op:string;value:QueryExprType};
+export type PivotOptions = {index:string;columns:string;values:string;max_rows:number;max_columns:number};
 export type QueryOperation =
+    {kind:'pivot';options:PivotOptions} |
     {kind:'connect';relation:RelationSymbol;from:number;to:number} |
     {kind:'group_by_identity';node:number} |
     {kind:'filter';predicate:QueryExprType} |
@@ -41,7 +43,7 @@ export type QueryOperation =
 // This is the dependent query type passed to the model's semantic checker.
 export type IntentType = {kind:'query';nodes:NodeType[];root:number;pair?:{left:number;right:number};steps:(QueryOperation&{id:string})[]};
 export type ProofReceipt={contractId:string;inputDigest:string;consumedStepIds:string[]};
-export type ModelShape = {element:Type;container:'table'|'option';maxRows?:number};
+export type ModelShape = {element:Type;container:'table'|'option';maxRows?:number;pivot?:PivotOptions};
 export type CheckedIntent = ModelShape & {plan:unknown;receipt:ProofReceipt;hasTotal?:boolean};
 export type ResultColumn = {name:string;type:string;nullable:boolean};
 export type ModelCheckPort = {
@@ -53,7 +55,7 @@ export type ModelCheckPort = {
     check_type(intent:IntentType,encoded:EncodedIntent):CheckedIntent;
 };
 /** Backend rows use the published column encoding; execution never re-plans the query. */
-export type RemoteResult={rows:SqlRow[];columns:ResultColumn[];max_rows?:number;total?:number};
+export type RemoteResult={rows:SqlRow[];columns:ResultColumn[];max_rows?:number;pivot?:{index:unknown;cells:[unknown,unknown][]}[];total?:number};
 /** The adapter owns lowering, backend connections and execution. */
 export type ModelExecutionPort={
     contractId:string;
@@ -111,6 +113,7 @@ export function encodeIntent(intent:IntentType,sourceOf:(value:object)=>SourceEv
             case 'group_by_identity':body={node:intent.nodes[step.node].id};break;
             case 'take':body={count:step.count};break;
             case 'take_opt':body={};break;
+            case 'pivot':body=step.options;break;
             default:throw Error('Unsupported model operation '+(step as {kind:string}).kind);
         }
         if(body&&typeof body==='object'&&!evidence.has(body))mark(body,step);

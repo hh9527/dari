@@ -71,6 +71,26 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
   const expected=Object.entries(b.result!.element.fields!).map(([name,t])=>({name,...storage(t)}));
   if(!result||!Array.isArray(result.rows)||!Array.isArray(result.columns)||result.max_rows===undefined||!Number.isInteger(result.max_rows)||result.max_rows<0||result.max_rows>bound||result.columns.length!==expected.length||result.columns.some((c,i)=>c.name!==expected[i].name||c.type!==expected[i].type||c.nullable!==expected[i].nullable))throw Error('Model transform contradicts published type/bound: '+name);
   if(result.rows.length>bound||result.rows.length>result.max_rows)throw Error('Model result exceeds published row bound: '+name);
+  if(b.pivot){
+   const {index,columns,values,max_rows,max_columns}=b.pivot;
+   const packed=result.pivot;
+   if(!Array.isArray(packed)||packed.length>max_rows||result.rows.length)throw Error('Invalid pivot payload: '+name);
+   const indices=new Set<unknown>(),keys=new Set<unknown>(),rows:SqlRow[]=[];
+   for(const row of packed){
+    if(row.index==null||indices.has(row.index)||!Array.isArray(row.cells)||!row.cells.length||row.cells.length>max_columns)throw Error('Invalid pivot index or cells: '+name);
+    indices.add(row.index);
+    const seen=new Set<unknown>();
+    for(const cell of row.cells){
+     if(!Array.isArray(cell)||cell.length!==2||cell[0]==null||seen.has(cell[0]))throw Error('Invalid or duplicate pivot column: '+name);
+     seen.add(cell[0]);keys.add(cell[0]);
+     if(keys.size>max_columns)throw Error('Pivot columns exceed max_columns ('+max_columns+')');
+     rows.push(convert(b.result!.element,{[index]:row.index,[columns]:cell[0],[values]:cell[1]},'decode'));
+    }
+   }
+   acquisitions.push({binding:name,kind:'remote',parameters,startedAt,elapsedMillis:performance.now()-start,rowCount:packed.length});
+   remoteRows.set(name,rows);return rows;
+  }
+  if(result.pivot!==undefined)throw Error('Unexpected pivot payload: '+name);
   if(b.includeTotal){
    const total=result.total;
    if(total===undefined||!Number.isSafeInteger(total)||total<result.rows.length)throw Error('Model transform contradicts published total row count: '+name);
@@ -284,7 +304,7 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
    const message=(error as Error).message,b=p.bindings.get(name);
    if(!b||/^(SubmitFailed|CheckFailed)\n/.test(message))throw error;
    const contract=/Model (transform contradicts|result exceeds|result Schema does not match)|projection does not match|contract changed|no such function:|Unsupported SQL (function|expression)/i.test(message);
-   throw Error(renderDiagnostics(p.source,[{at:b.ast.at,message,stage:'runtime',asset:b.ast.owner??name,code:contract?'runtime-contract':b.ast.name==='input'?'runtime-input':'runtime-value',...(contract?{reason:'运行实现或结果违背检查期已证明的契约',suggestion:'核对模型及宿主版本并修复实现；不要通过放宽类型或上界掩盖此错误'}:b.ast.name==='input'?{reason:'运行期输入不符合声明的类型或编码',suggestion:'核对输入字段、业务类型编码及可空性；不要修改 Schema 来掩盖错误值'}:{})}],'SubmitFailed'));
+   throw Error(renderDiagnostics(p.source,[{at:b.pivot?(b.ast.steps.at(-1)?.at??b.ast.at):b.ast.at,message,stage:'runtime',asset:b.ast.owner??name,code:contract?'runtime-contract':b.ast.name==='input'?'runtime-input':'runtime-value',...(contract?{reason:'运行实现或结果违背检查期已证明的契约',suggestion:'核对模型及宿主版本并修复实现；不要通过放宽类型或上界掩盖此错误'}:b.ast.name==='input'?{reason:'运行期输入不符合声明的类型或编码',suggestion:'核对输入字段、业务类型编码及可空性；不要修改 Schema 来掩盖错误值'}:{})}],'SubmitFailed'));
   }finally{scopes=saved;}
 
  }
@@ -342,7 +362,7 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
  }
  function renderChart(n:Node):import('./host.ts').FigureOutput {
   const a=Object.fromEntries(n.attrs.map((f:Node)=>[f.name,f.value]));const ref=(key:string)=>a[key].path[0];
-  for(const key of ['data','nodes'])if(a[key]){const b=p.bindings.get(ref(key));if(b?.result?.maxRows===undefined||b.result.maxRows>MAX_PRESENTATION_ROWS||binding(ref(key)).length>MAX_PRESENTATION_ROWS)throw Error('Presentation requires a proven and actual bound <= '+MAX_PRESENTATION_ROWS);}
+  for(const key of ['data','nodes'])if(a[key]){const b=p.bindings.get(ref(key));if(b?.result?.maxRows===undefined||b.result.maxRows>MAX_PRESENTATION_ROWS||(!b.pivot&&binding(ref(key)).length>MAX_PRESENTATION_ROWS))throw Error('Presentation requires a proven and actual bound <= '+MAX_PRESENTATION_ROWS);}
   const withTotal=(figure:import('./host.ts').FigureOutput,shown:number):import('./host.ts').FigureOutput=>{
    const total=figure.kind==='table'?remoteTotals.get(ref('data')):undefined;
    if(total===undefined)return figure;

@@ -16,7 +16,7 @@ export type {Plan} from './plan.ts';
 import {primaryCodecs} from './primary-codecs.ts';
 import type {HostPort} from './host.ts';
 export type Type={kind:string;name?:string;modelLogical?:string;displayName?:string;semantic?:string;presentation?:{multiplier:number;suffix:string;precision?:number};meanResult?:Type;inner?:Type;fields?:Record<string,Type>;input?:Type;output?:Type;codec?:import('./model.ts').ValueCodec};
-export type Binding={internal?:boolean;type:Type;ast:Node;kind:string;plan?:Plan;modelPlan?:unknown;hasTotal?:boolean;includeTotal?:boolean;parameters?:Node[];result?:ResultContract};
+export type Binding={internal?:boolean;type:Type;ast:Node;kind:string;plan?:Plan;modelPlan?:unknown;pivot?:import('./model.ts').PivotOptions;hasTotal?:boolean;includeTotal?:boolean;parameters?:Node[];result?:ResultContract};
 export type CheckedReference={at:number;path:string[];type:Type;rootType:Type;symbol?:string};
 export type CheckedTreeNode={at:number;name:string;contract?:ComponentContract;attributes:{at:number;name:string;type?:Type}[]};
 export type Program={treeNodes:CheckedTreeNode[];references:CheckedReference[];types:Map<string,Type>;bindings:Map<string,Binding>;answer:string;source:string;warnings:import('./diagnostics.ts').Diagnostic[];model?:ModelPort;modelContractId?:string;modelImplementationId?:string;contextType?:Type;contextContractId?:string;host?:HostPort};
@@ -31,8 +31,8 @@ export const contextSelectors:Readonly<Record<string,{key:string;type:Type;descr
 export const optional=(t:Type):Type=>t.kind==='option'?t:{kind:'option',inner:t};
 export const present=(t:Type):Type=>t.kind==='option'?t.inner!:t;
 const numeric=(type:Type):boolean=>{let t=present(type);if(t.codec?.variants||t.name?.startsWith('Reference('))return false;while(t.kind==='nominal')t=t.inner!;return t.name==='Int'||t.name==='Float';};
-export function show(t:Type):string{if(t.kind==='schema')return 'Schema({'+Object.entries(t.fields!).map(([n,t])=>n+': '+show(t)).join(', ')+'})';if(t.kind==='array')return 'Array('+(t.inner?show(t.inner):'?')+')';if(['option','table'].includes(t.kind))return (t.kind==='option'?'Option':'Table')+'('+show(t.inner!)+')';return t.displayName??t.name??t.kind;}
-export const same=(a:Type,b:Type):boolean=>a.kind===b.kind&&(a.kind==='schema'?Object.keys(a.fields!).length===Object.keys(b.fields!).length&&Object.entries(a.fields!).every(([k,t])=>!!b.fields![k]&&same(t,b.fields![k])):a.kind==='option'||a.kind==='table'?same(a.inner!,b.inner!):a.name===b.name);
+export function show(t:Type):string{if(t.kind==='pivot')return 'Pivot('+['index','key','value'].map(key=>show(t.fields![key])).join(', ')+')';if(t.kind==='schema')return 'Schema({'+Object.entries(t.fields!).map(([n,t])=>n+': '+show(t)).join(', ')+'})';if(t.kind==='array')return 'Array('+(t.inner?show(t.inner):'?')+')';if(['option','table'].includes(t.kind))return (t.kind==='option'?'Option':'Table')+'('+show(t.inner!)+')';return t.displayName??t.name??t.kind;}
+export const same=(a:Type,b:Type):boolean=>a.kind===b.kind&&((a.kind==='schema'||a.kind==='pivot')?Object.keys(a.fields!).length===Object.keys(b.fields!).length&&Object.entries(a.fields!).every(([k,t])=>!!b.fields![k]&&same(t,b.fields![k])):a.kind==='option'||a.kind==='table'?same(a.inner!,b.inner!):a.name===b.name);
 const err=(n:Node,message:string,details:FaultDetails={}):never=>{throw new Fault(message,n.at,{...(n.k==='call'?{expression:expressionHint(n)}:{}),...details});};
 export function projectionType(input:Type,path:readonly string[]):Type {
  let current=input,shortCircuit=false;
@@ -629,6 +629,23 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
      return {direction:term.name==='desc'?'Desc' as const:'Asc' as const,value:expression(term.args[0])};
     });
     steps.push({kind:'order_by',terms});
+   }else if(step.name==='pivot'){
+    if(step!==n.steps.at(-1))err(step,'pivot must be terminal');
+    const [options]=step.args;
+    if(step.args.length!==1||options.k!=='object')err(step,'pivot requires a record of axis projections and budgets');
+    const fields=new Map<string,Node>(options.fields.map((field:Node)=>[field.name,field.value]));
+    if(fields.size!==5||options.fields.length!==5)err(options,'pivot requires index, columns, values, max_rows and max_columns');
+    const axis=(key:string)=>{
+     const field=fields.get(key);
+     if(field?.k!=='projection'||field.path.length!==1||field.path[0].endsWith('?'))return err(field??options,'pivot '+key+' requires a direct projected field selector');
+     return field.path[0];
+    };
+    const budget=(key:string)=>{
+     const field=fields.get(key);
+     if(field?.k!=='literal'||!Number.isInteger(field.value)||field.value<1||field.value>MAX_RESULT_ROWS)return err(field??options,'pivot '+key+' requires a static integer 1..500');
+     return field.value;
+    };
+    steps.push({kind:'pivot',options:{index:axis('index'),columns:axis('columns'),values:axis('values'),max_rows:budget('max_rows'),max_columns:budget('max_columns')}});
    }else if(step.name==='take_opt'){
     if(step.args.length)err(step,'take_opt accepts no arguments');
     steps.push({kind:'take_opt'});
@@ -721,7 +738,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
   }
   if(p.host?.components.includes(n.name)){
    if(n.children.length)err(n,'Figure component cannot have children');
-   const binding=(key:string)=>{const ref=attrs[key];if(ref?.k!=='ref'||ref.path.length!==1)err(ref??n,key+' requires a Table declaration reference');const b=p.bindings.get(ref.path[0]);if(!b&&failed.has(ref.path[0]))throw new UpstreamTypeUnavailable();if(b?.type.kind!=='table'||b.type.inner?.kind!=='schema')err(ref,key+' requires Table(Schema)');attributeType(key,b!.type);return b!;};
+   const binding=(key:string)=>{const ref=attrs[key];if(ref?.k!=='ref'||ref.path.length!==1)err(ref??n,key+' requires a Table declaration reference');const b=p.bindings.get(ref.path[0]);if(!b&&failed.has(ref.path[0]))throw new UpstreamTypeUnavailable();if((b?.type.kind!=='table'&&!(key==='data'&&n.name==='LineChart'&&b?.type.kind==='pivot'))||b.type.inner?.kind!=='schema')err(ref,key+' requires Table(Schema) or a LineChart pivot');attributeType(key,b!.type);return b!;};
    const checkpoint=diagnostics.checkpoint();
    const allowed=['data','nodes','spec',...(attrs.spec?[]:['x','value','series','title','style','layout','allow_no_data','value_min','unit','x_label','value_label','formats','x_axis'])];
    settle(n.attrs,(attribute:Node)=>{if(!allowed.includes(attribute.name))err(attribute,'Unknown figure attribute '+attribute.name+' on '+n.name+'; chart configuration belongs in spec = {...}');});
@@ -730,6 +747,12 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    if(dataBound)finding(dataBound);
    if(nodes){const nodesBound=presentationBound('nodes',nodes);if(nodesBound)finding(nodesBound);}
    const spec=attrs.spec?figureSpec(attrs.spec,fields,n,env):figureSpec({k:'object',at:n.at,fields:Object.entries(attrs).filter(([key])=>!['data','nodes'].includes(key)).map(([name,value])=>({k:'field',name,value,at:value.at}))},fields,n,env);
+   if(data.pivot){
+    for(const [option,field] of [['x',data.pivot.index],['series',data.pivot.columns],['value',data.pivot.values]]){
+     if(spec[option]!==undefined&&spec[option]!==field)err(attrs.spec??n,'Pivot LineChart '+option+' must use '+field);
+     spec[option]=field;
+    }
+   }
    try{p.host.checkFigure(n.name,spec,fields,nodes?.type.inner!.fields);}catch(e){finding(new Fault((e as Error).message,attrs.spec?.at??n.at));}
    if(diagnostics.hasErrors(checkpoint))throw new UpstreamTypeUnavailable();
    if(n.name==='Table'&&data.hasTotal)data.includeTotal=true;
@@ -853,6 +876,15 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
     const type=b.path[0]==='out'?shape.element:node?{kind:'schema',fields:Object.fromEntries(Object.entries(node.dataset.members).map(([key,m])=>[key,m.type]))} as Type:undefined;
     if(type)p.references.push({at:b.at,path:b.displayPath,type,rootType:type});
    }
+   const pivot=intent.steps.find(s=>s.kind==='pivot');
+   if(pivot?.kind==='pivot'){
+    const wanted=pivot.options,actual=shape.pivot;
+    if(!actual||Object.entries(wanted).some(([key,value])=>actual[key as keyof typeof actual]!==value)||shape.maxRows!==wanted.max_rows)err(d,'Model result does not match the authored pivot contract');
+    for(const axis of [wanted.index,wanted.columns]){
+     const t=shape.element.fields?.[axis];
+     if(!t||t.kind==='option')err(d,'pivot axes require nonnullable projected fields');
+    }
+   }else if(shape.pivot)err(d,'Model returned an unexpected pivot contract');
    const take=intent.steps.find(s=>s.kind==='take'||s.kind==='take_opt');
    if(take?.kind==='take_opt'&&(shape.maxRows===undefined||shape.maxRows>1))err(d,'Model result bound exceeds the authored take_opt');
    const expectedContainer=d.value.steps.at(-1)?.name==='take_opt'?'option':'table';
@@ -862,7 +894,10 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    for(const t of Object.values(shape.element.fields!)){const base=present(t);if(!['scalar','nominal'].includes(base.kind))err(d,'Model columns must be logical scalars');}
    if(shape.maxRows===undefined||shape.maxRows>MAX_RESULT_ROWS)err(d,'Remote execution requires a proven result bound <= '+MAX_RESULT_ROWS,{code:'query-bound',reason:d.name+(shape.maxRows===undefined?' 尚未证明远端行数上界':' 已证明至多 '+shape.maxRows+' 行，超出远端上限')+'。本地下游不能限制远端取数',suggestion:'在远端阶段结束前 order_by(...) |> take(n)，n <= 500，再进行本地后处理'});
    if(intent.steps.some(s=>s.kind==='order_by')){let key='_dari_remote_order';while(Object.hasOwn(shape.element.fields!,key))key+='_';modelOrdering=[{key,direction:'asc'}];}
-   t={kind:shape.container,inner:shape.element};kind='model';modelShape=shape;
+   const axes=shape.pivot;
+   const fields=shape.element.fields!;
+   t=axes?{kind:'pivot',inner:shape.element,fields:{index:fields[axes.index],key:fields[axes.columns],value:fields[axes.values]}}:{kind:shape.container,inner:shape.element};
+   kind='model';modelShape=shape;
   }
   else if(d.value.k==='tree'){t=tree(d.value.root);kind='tree';}
   else t=infer(d.value);
@@ -875,7 +910,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    if(role==='data'&&['answer','figure','report','content'].includes(t!.kind))err(d,'data requires a data value; put charts inline in report or answer');
    if(['report','answer'].includes(role)&&(d.value.k!=='tree'||t!.kind!==role))err(d,role+' requires tree! with a '+(role==='answer'?'Answer':role==='report'?'Report':'chart or Table')+' root');
   }
-  if(d.annotation){const wanted=type(d.annotation);if(!compatible(wanted,t!))err(d,'Declaration annotation expects '+show(wanted)+'; got '+show(t!),mismatchDetails(wanted,t!));}if(d.editorBinding){const b=d.editorBinding;p.references.push({at:b.nameAt??b.at,path:[b.displayName??b.name],type:t!,rootType:t!});}p.bindings.set(d.name,{internal:!!d.internal,type:t!,ast:d.value,kind,plan,modelPlan:modelShape?.plan,hasTotal:modelShape?.hasTotal,parameters,result:plan?.result??(modelShape?{element:modelShape.element,container:t!.kind==='option'?'option':'table',maxRows:modelShape.maxRows,ordering:modelOrdering}:kind==='literal_table'?{element:t!.inner!,container:'table',maxRows:d.value.args[0].items.length,ordering:[]}:kind==='source'?{element:t!.inner!,container:'table',ordering:[]}:undefined)});
+  if(d.annotation){const wanted=type(d.annotation);if(!compatible(wanted,t!))err(d,'Declaration annotation expects '+show(wanted)+'; got '+show(t!),mismatchDetails(wanted,t!));}if(d.editorBinding){const b=d.editorBinding;p.references.push({at:b.nameAt??b.at,path:[b.displayName??b.name],type:t!,rootType:t!});}p.bindings.set(d.name,{internal:!!d.internal,type:t!,ast:d.value,kind,plan,modelPlan:modelShape?.plan,pivot:modelShape?.pivot,hasTotal:modelShape?.hasTotal,parameters,result:plan?.result??(modelShape?{element:modelShape.element,container:t!.kind==='option'?'option':'table',maxRows:modelShape.maxRows,ordering:modelOrdering}:kind==='literal_table'?{element:t!.inner!,container:'table',maxRows:d.value.args[0].items.length,ordering:[]}:kind==='source'?{element:t!.inner!,container:'table',ordering:[]}:undefined)});
   }catch(error){finding(error);if(!p.bindings.has(d.name)&&!p.types.has(d.name))failed.add(d.name);}
  }
  if(diagnostics.hasErrors()&&!partial)throw new DiagnosticFailure(source,diagnostics.list(),p.warnings);

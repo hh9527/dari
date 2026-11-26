@@ -166,6 +166,7 @@ export function lowerPlanBindings(declaration:Node,fresh:()=>string,globals:Read
  }
  function apply(input:Relation,operation:Node):Relation{
   if(joins.has(operation.name)||sets.has(operation.name)||operation.name==='pair')return combine(input,operation);
+  if(input.steps.some(s=>s.name==='pivot'))fail(operation,'pivot is terminal');
   let r={...input,steps:[...input.steps],scope:new Map(input.scope)};
   if(operation.name==='connect'&&r.language==='query'&&!r.projected){
    const args=operation.args;
@@ -180,7 +181,7 @@ export function lowerPlanBindings(declaration:Node,fresh:()=>string,globals:Read
   }
   // Preserve model ownership of ordering/selection whenever it can consume the
   // complete query; post-projection transforms become ordinary SQL plan nodes.
-  if(r.language==='query'&&r.projected&&(!['order_by','take','take_opt'].includes(operation.name)||r.steps.some((s:Node)=>['take','take_opt'].includes(s.name)))){
+  if(r.language==='query'&&r.projected&&(!['order_by','take','take_opt','pivot'].includes(operation.name)||r.steps.some((s:Node)=>['take','take_opt'].includes(s.name)))){
    // Keep remote ordering/take inside its acquisition boundary. A local
    // successor consumes bounded rows, never a fragment of remote SQL.
    const scope=r.scope,name=materialize(r,'query projection');
