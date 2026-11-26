@@ -1,7 +1,7 @@
 import {encodePart,type SemanticGraph} from './knowledge-graph.ts';
 import {knowledgePoints} from './point-knowledge.ts';
 import {semanticId} from './semantic-id.ts';
-import {lexicalQuery,matchLexical} from './knowledge-match.ts';
+import {lexicalQuery,matchLexical,normalizeLexical} from './knowledge-match.ts';
 
 const record=(v:unknown):v is Record<string,any>=>v!==null&&typeof v==='object'&&!Array.isArray(v);
 const compare=(a:string,b:string)=>a<b?-1:a>b?1:0;
@@ -49,14 +49,33 @@ function discoverQuery(graph:SemanticGraph,args:Record<string,unknown>){
   if(!props.length&&!values.length)throw new Error('provide at least one member or value term');
   const index=discoveryIndex(graph),matchedEntities=new Map<string,{q:string;score:number}[]>();
   const unmatched:{entity:string[];member:string[];value:string[]}={entity:[],member:[],value:[]};
+  let classificationMatches: {candidate:Candidate; dimension:string; value:Point}[]=[];
   for(const q of entity){
     const query=lexicalQuery(q),hits=[...index.entities].map(([id,words])=>({id,score:matchLexical(query,fields(words)).score})).filter(h=>h.score>0).sort((a,b)=>b.score-a.score||compare(a.id,b.id));
-    if(!hits.length)unmatched.entity.push(q);
+    if(!hits.length){
+      const exactValues=index.values.filter(value=>
+        [decodeURIComponent(value.id.split('/').at(-1)!),...value.names]
+          .some(name=>normalizeLexical(name.trim())===query.phrase));
+      classificationMatches=index.properties.flatMap(candidate=>exactValues
+        .filter(value=>candidate.property.types.includes(value.root))
+        .flatMap(value=>candidate.property.dimensions
+          .filter(id=>{
+            const fact=index.points.get(id)!.fact;
+            return fact.filterable===true&&fact.type===value.root&&fact.ops?.includes('Eq');
+          })
+          .map(dimension=>({candidate,dimension,value}))));
+      for(const {candidate} of classificationMatches)matchedEntities.set(candidate.entity,[{q,score:1}]);
+      if(!classificationMatches.length)unmatched.entity.push(q);
+    }
     for(const hit of hits)matchedEntities.set(hit.id,[...(matchedEntities.get(hit.id)??[]),{q,score:hit.score}]);
   }
-  const candidates=index.properties.filter(p=>matchedEntities.has(p.entity));
+  const matchedDatasets=new Set(classificationMatches.map(({candidate})=>candidate.entity+'\n'+candidate.dataset));
+  const candidates=index.properties.filter(p=>matchedDatasets.size
+    ?matchedDatasets.has(p.entity+'\n'+p.dataset)
+    :matchedEntities.has(p.entity));
   const selected=new Map<Candidate,{props:string[];values:{q:string;id:string;type:string;facts:Record<string,any>}[]}>();
   const select=(p:Candidate)=>{let match=selected.get(p);if(!match)selected.set(p,match={props:[],values:[]});return match;};
+  for(const {candidate} of classificationMatches)select(candidate);
   for(const q of props){
     const query=lexicalQuery(q),hits=candidates.map(p=>({p,score:matchLexical(query,fields(p.words)).score})).filter(h=>h.score>0).sort((a,b)=>b.score-a.score||compare(a.p.entity+'/'+a.p.dataset+'/'+a.p.property.name,b.p.entity+'/'+b.p.dataset+'/'+b.p.property.name));
     if(!hits.length)unmatched.member.push(q);
@@ -69,6 +88,7 @@ function discoverQuery(graph:SemanticGraph,args:Record<string,unknown>){
   }
   const results=[...selected].map(([p,matched])=>({
     ...p.property,entity:p.entity,dataset:p.dataset,subject:p.subject,matched,
+    classifications:classificationMatches.filter(match=>match.candidate===p).map(({dimension,value})=>({dimension,variant:decodeURIComponent(value.id.split('/').at(-1)!)})),
     entries:unique([...p.property.dimensions,...p.property.measures,...p.property.counters]).map(id=>{
       const fact=index.points.get(id)!.fact;
       const type=typeof fact.type==='string'?fact.type
@@ -89,7 +109,8 @@ export function discoverConcepts(graph:SemanticGraph,args:Record<string,unknown>
   })};
 }
 
-export function renderConcepts(_args:unknown,value:{data:ReturnType<typeof discoverConcepts>;contracts?:Record<string,{dataset?:string;symbol?:string;type?:string}>;clocks?:Record<string,string>}){
+export function renderConcepts(_args:unknown,value:{data:ReturnType<typeof discoverConcepts>;contracts?:Record<string,{dataset?:string;symbol?:string;type?:string;variants?:string[]}>;clocks?:Record<string,string>}){
+  const classificationLines=new Map<string,Set<string>>();
   const clockLines=new Map<string,string>();
   const groups=new Map<string,Map<string,Map<string,string>>>();
   for(const query of value.data.queries)for(const item of query.results){
@@ -98,6 +119,14 @@ export function renderConcepts(_args:unknown,value:{data:ReturnType<typeof disco
     const dataset=item.entries.map(entry=>value.contracts?.[entry.id]?.dataset).find(Boolean)??item.dataset;
     let entries=datasets.get(dataset);
     if(!entries)datasets.set(dataset,entries=new Map());
+    for(const {dimension,variant} of item.classifications){
+      const contract=value.contracts?.[dimension];
+      const symbol=contract?.variants?.find(name=>name.endsWith('::'+variant));
+      if(!contract?.symbol||!symbol)continue;
+      let conditions=classificationLines.get(dataset);
+      if(!conditions)classificationLines.set(dataset,conditions=new Set());
+      conditions.add('- 分类条件：`'+contract.symbol+' == '+symbol+'`');
+    }
     const clockId=value.clocks?.[item.dataset];
     const clock=clockId?value.contracts?.[clockId]:undefined;
     if(clock?.symbol&&clock.type)clockLines.set(dataset,`- 主时间维度：\`${clock.symbol}: ${clock.type}\`，支持窗口筛选`);
@@ -115,6 +144,7 @@ export function renderConcepts(_args:unknown,value:{data:ReturnType<typeof disco
       lines.push('## '+dataset,'');
       const clockLine=clockLines.get(dataset);
       if(clockLine)lines.push(clockLine);
+      lines.push(...(classificationLines.get(dataset)??[]));
       for(const [name,type] of [...entries].sort(([a],[b])=>compare(a,b)))lines.push('- '+name+': '+type);
       lines.push('');
     }

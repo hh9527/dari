@@ -4,6 +4,7 @@ export type HoverContent={signature:string;type?:string;description?:string;deta
 const WIDTH=64;
 export const trimText=(text:string):string=>text.replace(/[\s。；;]+$/u,'');
 const shortName=(name:string):string=>{
+ if(name.includes('('))return name;
  const i=name.lastIndexOf('::');
  return i>=0?name.slice(i+2):name;
 };
