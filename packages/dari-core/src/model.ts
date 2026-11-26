@@ -20,6 +20,7 @@ export type QueryExprType =
     {kind:'literal';value:null|boolean|number|string;type:Type} |
     {kind:'parameter';index:number;type:Type} |
     {kind:'member';node:number;member:MemberSymbol} |
+    {kind:'subnet';value:QueryExprType;cidr:string;negate:boolean} |
     {kind:'mapped_comparison';node:number;member:MemberSymbol;logical:string;value:string;op:'Eq'|'Ne'} |
     {kind:'calendar_bucket';node:number;member:MemberSymbol;conversion?:true;unit:'Year'|'Quarter'|'Month'|'Week'|'Day';timeZone:QueryExprType} |
     {kind:'to_datetime_utc';node:number;member:MemberSymbol} |
@@ -41,7 +42,7 @@ export type QueryOperation =
 export type IntentType = {kind:'query';nodes:NodeType[];root:number;pair?:{left:number;right:number};steps:(QueryOperation&{id:string})[]};
 export type ProofReceipt={contractId:string;inputDigest:string;consumedStepIds:string[]};
 export type ModelShape = {element:Type;container:'table'|'option';maxRows?:number};
-export type CheckedIntent = ModelShape & {plan:unknown;receipt:ProofReceipt};
+export type CheckedIntent = ModelShape & {plan:unknown;receipt:ProofReceipt;hasTotal?:boolean};
 export type ResultColumn = {name:string;type:string;nullable:boolean};
 export type ModelCheckPort = {
     contractId:string;
@@ -52,12 +53,12 @@ export type ModelCheckPort = {
     check_type(intent:IntentType,encoded:EncodedIntent):CheckedIntent;
 };
 /** Backend rows use the published column encoding; execution never re-plans the query. */
-export type RemoteResult={rows:SqlRow[];columns:ResultColumn[];max_rows?:number};
+export type RemoteResult={rows:SqlRow[];columns:ResultColumn[];max_rows?:number;total?:number};
 /** The adapter owns lowering, backend connections and execution. */
 export type ModelExecutionPort={
     contractId:string;
     implementationId:string;
-    execute(plan:unknown,parameters:unknown[]):RemoteResult;
+    execute(plan:unknown,parameters:unknown[],includeTotal?:boolean):RemoteResult;
 };
 export type ModelPort=ModelCheckPort & ModelExecutionPort;
 export function storage(t:Type):{type:string;nullable:boolean}{
@@ -79,6 +80,7 @@ export function encodeIntent(intent:IntentType,sourceOf:(value:object)=>SourceEv
     function expressionValue(e:QueryExprType):unknown{
         switch(e.kind){
             case 'member':return {kind:e.kind,node:intent.nodes[e.node].id,member:e.member.symbol};
+            case 'subnet':return {kind:e.kind,value:expression(e.value),cidr:e.cidr,negate:e.negate};
             case 'mapped_comparison':return {kind:e.kind,value:expression({kind:'member',node:e.node,member:e.member}),logical:e.logical,member:e.value,op:e.op};
             case 'calendar_bucket':return {kind:e.kind,value:expression({kind:e.conversion?'to_datetime_utc':'member',node:e.node,member:e.member}),unit:e.unit,timeZone:expression(e.timeZone)};
             case 'to_datetime_utc':return {kind:e.kind,value:expression({kind:'member',node:e.node,member:e.member})};

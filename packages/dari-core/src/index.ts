@@ -24,3 +24,5 @@ export type {SourceSpan,InputOrigin,SourceEvidence} from './source.ts';
 export type {ModelLocation} from './syntax.ts';
 
 export {registerCalendarFunctions} from './calendar.ts';
+
+export {registerSqliteRegexp} from './database.ts';

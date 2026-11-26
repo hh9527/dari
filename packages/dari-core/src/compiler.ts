@@ -1,3 +1,4 @@
+import type {RelationSymbol} from './model.ts';
 import {SourceOffsets,type SourceEvidence} from './source.ts';
 import {builtinComponents,commonAttributes,componentContract,type ComponentContract} from './components.ts';
 import {calendarTypes,calendarFunctions} from './calendar.ts';
@@ -15,7 +16,7 @@ export type {Plan} from './plan.ts';
 import {primaryCodecs} from './primary-codecs.ts';
 import type {HostPort} from './host.ts';
 export type Type={kind:string;name?:string;modelLogical?:string;displayName?:string;semantic?:string;presentation?:{multiplier:number;suffix:string;precision?:number};meanResult?:Type;inner?:Type;fields?:Record<string,Type>;input?:Type;output?:Type;codec?:import('./model.ts').ValueCodec};
-export type Binding={internal?:boolean;type:Type;ast:Node;kind:string;plan?:Plan;modelPlan?:unknown;parameters?:Node[];result?:ResultContract};
+export type Binding={internal?:boolean;type:Type;ast:Node;kind:string;plan?:Plan;modelPlan?:unknown;hasTotal?:boolean;includeTotal?:boolean;parameters?:Node[];result?:ResultContract};
 export type CheckedReference={at:number;path:string[];type:Type;rootType:Type;symbol?:string};
 export type CheckedTreeNode={at:number;name:string;contract?:ComponentContract;attributes:{at:number;name:string;type?:Type}[]};
 export type Program={treeNodes:CheckedTreeNode[];references:CheckedReference[];types:Map<string,Type>;bindings:Map<string,Binding>;answer:string;source:string;warnings:import('./diagnostics.ts').Diagnostic[];model?:ModelPort;modelContractId?:string;modelImplementationId?:string;contextType?:Type;contextContractId?:string;host?:HostPort};
@@ -59,13 +60,15 @@ const bool=(n:Node,t:Type)=>{
  err(n,'Predicate requires Bool; got '+show(t),nullable?{code:'nullable-predicate',reason:'可空比较或计算可能返回空值，条件需要明确的 True 或 False',suggestion:'仅当空值应表示不满足时，使用 '+(hint?'unwrap_or!('+hint+', False)':'unwrap_or! 为该条件指定 False 默认值')+'；若空值应让条件成立，可选择 True 或单独表达空值条件'}:{code:'predicate-type',reason:'条件必须是 Bool；数值、文本和可选行没有隐式真假转换',suggestion:'数值或文本请显式比较；可空值使用 is_some/is_none；可选行在 tree! 中使用 if let Some 解构'});
 };
 const compatible=(a:Type,b:Type):boolean=>same(a,b)||a.kind==='option'&&(b.name==='None'||compatible(a.inner!,b))||a.name==='Float'&&b.name==='Int';
-function modelPresence(root:number,pair:IntentType['pair'],steps:QueryOperation[],nodeCount:number):Map<number,boolean>{
+function modelPresence(root:number,pair:IntentType['pair'],steps:QueryOperation[],nodeCount:number,causes?:Map<number,RelationSymbol>):Map<number,boolean>{
  const presence=new Map<number,boolean>([[root,false]]);
  if(pair)presence.set(pair.right,false);
  for(let pass=0;pass<nodeCount;pass++)for(const edge of steps){
   if(edge.kind!=='connect'||presence.has(edge.from)===presence.has(edge.to))continue;
   const forward=presence.has(edge.from),origin=forward?edge.from:edge.to,target=forward?edge.to:edge.from,cardinality=forward?edge.relation.toCardinality:edge.relation.fromCardinality;
   presence.set(target,cardinality==='Optional'||!!presence.get(origin)&&cardinality==='One');
+  const cause=cardinality==='Optional'?edge.relation:cardinality==='One'?causes?.get(origin):undefined;
+  if(cause)causes?.set(target,cause);
  }
  return presence;
 }
@@ -97,7 +100,8 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    const findings=modelDiagnostics.map(d=>{
     const valid=(Array.isArray(d.locs)?d.locs:[]).flatMap(loc=>loc?.source==='<input>'&&loc.start&&loc.end?(()=>{const range=sourceOffsets.toChars({start:loc.start.offset,end:loc.end.offset});return range?[range]:[];})():[]);
     const fallback=modelFailure(new Error(d.message),intent,query,valid[0]);
-    return {at:valid[0]?.start??fallback.at,...fallback.details,end:valid[0]?.end,message:fallback.message,stage:'model' as const,expression:valid[0]?source.slice(valid[0].start,valid[0].end):fallback.details.expression,related:d.locs};
+    const refined=fallback.details.code==='model-optional-predicate'&&fallback.details.end!==undefined;
+    return {at:refined?fallback.at:valid[0]?.start??fallback.at,...fallback.details,end:refined?fallback.details.end:valid[0]?.end,message:fallback.message,stage:'model' as const,expression:refined||!valid[0]?fallback.details.expression:source.slice(valid[0].start,valid[0].end),related:d.locs};
    });
    if(findings.length)return new DiagnosticFailure(source,findings);
   }
@@ -130,9 +134,43 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    }
   }
   if(/Predicate requires Bool; got Option\(Bool\)|Nullable filter parameter requires/.test(message)){
+   const causes=new Map<number,RelationSymbol>();
+   modelPresence(intent.root,intent.pair,intent.steps,intent.nodes.length,causes);
+   function nullableReasons(expr:QueryExprType):string[]{
+    switch(expr.kind){
+     case 'member':{
+      const reasons:string[]=[];
+      if(expr.member.type.kind==='option')reasons.push(hint(expr)+' 是可空字段');
+      const relation=causes.get(expr.node);
+      if(relation)reasons.push(hint(expr)+' 经可选关系 '+relation.symbol+' 读取，关联未命中时为空');
+      return reasons;
+     }
+     case 'parameter':return expr.type.kind==='option'?[hint(expr)+' 是可空参数']:[];
+     case 'binary':return [...nullableReasons(expr.left),...nullableReasons(expr.right)];
+     case 'unary':case 'subnet':return nullableReasons(expr.value);
+     case 'mapped_comparison':return nullableReasons({kind:'member',node:expr.node,member:expr.member});
+     case 'call':return ['unwrap_or','is_none','is_some'].includes(expr.name)?[]:expr.args.flatMap(nullableReasons);
+     default:return [];
+    }
+   }
+   function conditions(expr:QueryExprType):QueryExprType[]{
+    if(expr.kind==='binary'&&['&&','||'].includes(expr.op))return [...conditions(expr.left),...conditions(expr.right)];
+    return [expr];
+   }
    const filters=intent.steps.flatMap(step=>step.kind==='filter'?[step.predicate]:[]);
-   const target=filters.find(located)??(filters.length===1?filters[0]:undefined),condition=target?hint(target):'condition';
-   return new Fault(message,target?modelLocations.get(target)?.at??query.at:query.at,{stage:'model',code:'model-optional-predicate',expression:target?condition:undefined,reason:'可空字段、可选关联或可空参数使比较结果为 Option(Bool)，筛选需要明确的 Bool',suggestion:'空值按不满足处理时写 filter(unwrap_or!('+condition+', False))；确需接受未知条件时选择 True。保留类型化身份参数，不改为名称匹配；聚合阈值参数仍须非空'});
+   const scoped=filters.filter(located);
+   const candidates=(scoped.length?scoped:filters).flatMap(conditions)
+    .map(expr=>({expr,reasons:nullableReasons(expr)})).filter(item=>item.reasons.length);
+   const match=candidates.find(item=>located(item.expr))??(candidates.length===1?candidates[0]:undefined);
+   if(match){
+    const node=modelLocations.get(match.expr);
+    const condition=hint(match.expr);
+    return new Fault(message,node?.sourceStart??node?.at??query.at,{end:node?.end,stage:'model',code:'model-optional-predicate',
+     expression:condition,reason:[...new Set(match.reasons)].join('，')+'。此条件可能返回 None',
+     suggestion:'若空值应排除该行，将此条件写为 unwrap_or!('+condition+', False)。若空值应保留该行，按业务口径选择 True'});
+   }
+   const target=scoped[0]??(filters.length===1?filters[0]:undefined),condition=target?hint(target):'condition';
+   return new Fault(message,target?modelLocations.get(target)?.at??query.at:query.at,{stage:'model',code:'model-optional-predicate',expression:target?condition:undefined,reason:'可空字段、可选关联或可空参数使比较结果为 Option(Bool)，筛选需要明确的 Bool',suggestion:'若空值应排除该行，使用 unwrap_or!('+condition+', False)。若空值应保留该行，按业务口径选择 True'});
   }
   function mismatch(expr:QueryExprType):Fault|undefined{
    if(expr.kind!=='binary')return;
@@ -174,6 +212,13 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
  }
  function assign(n:Node,wanted:Type,env:Record<string,Type>={}){const got=infer(n,env);if(!compatible(wanted,got))err(n,'Expected '+show(wanted)+'; got '+show(got),mismatchDetails(wanted,got));}
  function infer(n:Node,env:Record<string,Type>={},aggregate=false,groupKeys=new Set<string>()):Type{
+  if(n.k==='call'&&n.name==='total_rows'){
+   const arg=n.args[0],name=arg?.path?.[0];
+   const binding=arg?.k==='ref'&&arg.path.length===1&&!Object.hasOwn(env,name)?p.bindings.get(name):undefined;
+   if(n.args.length!==1||!binding?.hasTotal)return err(n,'total_rows requires a named query_remote! result with a model-supported final take(N)');
+   binding.includeTotal=true;
+   return n.resolvedType=scalar('Int');
+  }
   if(n.k==='projection')err(n,'$.field requires an input row context; use it in figure settings or map_opt');
   if(n.k==='context')err(n,'context! must directly initialize a top-level data declaration');
   if(n.k==='do'){
@@ -503,6 +548,15 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
      return {kind:'member',node:index,member};
     }
    }
+   if(value.k==='call'&&['in_subnet','not_in_subnet'].includes(value.name)){
+    const [address,subnet]=value.args;
+    if(value.args.length!==2||subnet.k!=='literal'||typeof subnet.value!=='string')
+     return err(value,'Remote subnet filters require an IPv4 dimension and a canonical CIDR string literal');
+    const input=expression(address);
+    if(input.kind!=='member'||input.member.kind!=='dimension')
+     return err(address,'Remote subnet filters require a direct IPv4 dimension');
+    return {kind:'subnet',value:input,cidr:subnet.value,negate:value.name==='not_in_subnet'};
+   }
    if(value.k==='call'&&value.name==='to_datetime_utc'){
     if(value.args.length!==1)err(value,'to_datetime_utc requires one EpochMillis or DateTimeUtc dimension');
     const input=expression(value.args[0]);
@@ -678,6 +732,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    const spec=attrs.spec?figureSpec(attrs.spec,fields,n,env):figureSpec({k:'object',at:n.at,fields:Object.entries(attrs).filter(([key])=>!['data','nodes'].includes(key)).map(([name,value])=>({k:'field',name,value,at:value.at}))},fields,n,env);
    try{p.host.checkFigure(n.name,spec,fields,nodes?.type.inner!.fields);}catch(e){finding(new Fault((e as Error).message,attrs.spec?.at??n.at));}
    if(diagnostics.hasErrors(checkpoint))throw new UpstreamTypeUnavailable();
+   if(n.name==='Table'&&data.hasTotal)data.includeTotal=true;
    n.checkedSpec=spec;n.checkedFields=fields;n.checkedPaths=Object.keys(fields).filter(key=>!Object.hasOwn(data.type.inner!.fields!,key)).map(key=>key.split('.'));return {kind:'figure'};
   }
   const signature=Object.fromEntries(Object.entries(builtinComponents).map(([name,c])=>[name,Object.keys(c.attributes)]));
@@ -709,6 +764,8 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    if(spec.allow_no_data!==undefined&&typeof spec.allow_no_data!=='boolean')err(n,'Table allow_no_data requires Bool');
    if(spec.title!==undefined&&typeof spec.title!=='string')err(n,'Table title requires static text');
    if(spec.precision!==undefined)try{precision(spec.precision);}catch(e){err(n,(e as Error).message);}
+   const data=lookup('data');
+   if(data.hasTotal)data.includeTotal=true;
    n.checkedSpec=spec;n.checkedFields=fields;
   }
   if(n.name==='UseReport'&&lookup('ref').type.kind!=='report')err(n,'UseReport requires report');
@@ -818,7 +875,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    if(role==='data'&&['answer','figure','report','content'].includes(t!.kind))err(d,'data requires a data value; put charts inline in report or answer');
    if(['report','answer'].includes(role)&&(d.value.k!=='tree'||t!.kind!==role))err(d,role+' requires tree! with a '+(role==='answer'?'Answer':role==='report'?'Report':'chart or Table')+' root');
   }
-  if(d.annotation){const wanted=type(d.annotation);if(!compatible(wanted,t!))err(d,'Declaration annotation expects '+show(wanted)+'; got '+show(t!),mismatchDetails(wanted,t!));}if(d.editorBinding){const b=d.editorBinding;p.references.push({at:b.nameAt??b.at,path:[b.displayName??b.name],type:t!,rootType:t!});}p.bindings.set(d.name,{internal:!!d.internal,type:t!,ast:d.value,kind,plan,modelPlan:modelShape?.plan,parameters,result:plan?.result??(modelShape?{element:modelShape.element,container:t!.kind==='option'?'option':'table',maxRows:modelShape.maxRows,ordering:modelOrdering}:kind==='literal_table'?{element:t!.inner!,container:'table',maxRows:d.value.args[0].items.length,ordering:[]}:kind==='source'?{element:t!.inner!,container:'table',ordering:[]}:undefined)});
+  if(d.annotation){const wanted=type(d.annotation);if(!compatible(wanted,t!))err(d,'Declaration annotation expects '+show(wanted)+'; got '+show(t!),mismatchDetails(wanted,t!));}if(d.editorBinding){const b=d.editorBinding;p.references.push({at:b.nameAt??b.at,path:[b.displayName??b.name],type:t!,rootType:t!});}p.bindings.set(d.name,{internal:!!d.internal,type:t!,ast:d.value,kind,plan,modelPlan:modelShape?.plan,hasTotal:modelShape?.hasTotal,parameters,result:plan?.result??(modelShape?{element:modelShape.element,container:t!.kind==='option'?'option':'table',maxRows:modelShape.maxRows,ordering:modelOrdering}:kind==='literal_table'?{element:t!.inner!,container:'table',maxRows:d.value.args[0].items.length,ordering:[]}:kind==='source'?{element:t!.inner!,container:'table',ordering:[]}:undefined)});
   }catch(error){finding(error);if(!p.bindings.has(d.name)&&!p.types.has(d.name))failed.add(d.name);}
  }
  if(diagnostics.hasErrors()&&!partial)throw new DiagnosticFailure(source,diagnostics.list(),p.warnings);

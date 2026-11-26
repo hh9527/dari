@@ -28,21 +28,23 @@ function keyText(value:any):string{
   if(value?.op==='eq'&&Object.hasOwn(value,'from')&&Object.hasOwn(value,'to'))return `${ref(value.from)} = ${ref(value.to)}`;
   return JSON.stringify(value);
 }
-export function renderRoutes(_args:unknown,value:{data:ReturnType<typeof routePoints>}):RenderBlock[]{
-  const r=value.data,lines=[`## ${r.from} → ${r.to}`,''];
-  if(r.via.length)lines.push(`必经节点（依次）：${r.via.join(' → ')}`,'');
+export function renderRoutes(_args:unknown,value:{data:ReturnType<typeof routePoints>;labels?:Record<string,string>}):RenderBlock[]{
+  const label=(id:string)=>value.labels?.[id]??id;
+  const r=value.data,lines=[`## ${label(r.from)} → ${label(r.to)}`,''];
+  if(r.via.length)lines.push(`必经节点（依次）：${r.via.map(label).join(' → ')}`,'');
   for(let i=0;i<r.paths.length;i++){
     const p=r.paths[i];if(r.paths.length>1)lines.push(`### 路径 ${i+1}`,'');
-    if(r.from!==p.nodes[0])lines.push(`起点承载：${r.from} in ${p.nodes[0]}`,'');
-    if(!p.edges.length)lines.push(`- 同一数据集：${p.nodes[0]}（无需跨表连接）`);
+    if(r.from!==p.nodes[0])lines.push(`起点承载：${label(r.from)} in ${label(p.nodes[0])}`,'');
+    if(!p.edges.length)lines.push(`- 同一数据集：${label(p.nodes[0])}（无需跨表连接）`);
     p.edges.forEach((edge,j)=>{
       const forward=edge.from===p.nodes[j],card=edge.cardinality;
       const cardinality=card?`${card[forward?'from':'to']}→${card[forward?'to':'from']}`:'未声明';
-      lines.push(`- ${p.nodes[j]} ${forward?'--[':'<--['}${edge.relation}${forward?']-->':']--'} ${p.nodes[j+1]} · ${cardinality} · key: ${keyText(edge.key)}`);
-      if(edge.guard!==null)lines.push(`  guard: ${JSON.stringify(edge.guard)}`);
-      if(edge.from_role||edge.to_role)lines.push(`  roles: ${edge.from_role??'未声明'} → ${edge.to_role??'未声明'}`);
+      const published=label(edge.relation)!==edge.relation;
+      lines.push(`- ${label(p.nodes[j])} ${forward?'--[':'<--['}${label(edge.relation)}${forward?']-->':']--'} ${label(p.nodes[j+1])} · ${cardinality}${published?'':' · key: '+keyText(edge.key)}`);
+      if(edge.guard!==null)lines.push(published?'  关系带有模型限定条件。':`  guard: ${JSON.stringify(edge.guard)}`);
+      if(!published&&(edge.from_role||edge.to_role))lines.push(`  roles: ${edge.from_role??'未声明'} → ${edge.to_role??'未声明'}`);
     });
-    if(r.to!==p.nodes.at(-1))lines.push('',`终点承载：${r.to} in ${p.nodes.at(-1)}`);
+    if(r.to!==p.nodes.at(-1))lines.push('',`终点承载：${label(r.to)} in ${label(p.nodes.at(-1)!)}`);
     lines.push('');
   }
   if(!r.paths.length)lines.push('✗ 未找到满足约束的无环路径');

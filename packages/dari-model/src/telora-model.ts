@@ -1,5 +1,5 @@
 import {modelErrorText,ModelCheckFailure,type InputOrigin} from '@local/dari-core';
-import {sharedTypes} from '@local/dari-core';
+import {sharedTypes,show} from '@local/dari-core';
 import {Worker} from 'node:worker_threads';
 import {accessSync,readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
@@ -11,7 +11,7 @@ import {primaryCodecs} from '@local/dari-core/codecs';
 
 type WireMember={id:string;symbol:string;kind:'dimension'|'measure';logical:string;storage:string;nullable:boolean};
 type WireDataset={id:string;symbol:string;members:WireMember[]};
-type WireTemplate={container:'table'|'option';receipt:ProofReceipt;sql:string;bindings:any[];columns:(ResultColumn&{logical:string})[];max_rows:number|null};
+type WireTemplate={container:'table'|'option';receipt:ProofReceipt;sql:string;total_sql?:string|null;bindings:any[];columns:(ResultColumn&{logical:string})[];max_rows:number|null};
 export async function openModel(artifact:string){
     accessSync(artifact);
     const buffer=new SharedArrayBuffer(8+8*1024*1024),state=new Int32Array(buffer,0,2),bytes=new Uint8Array(buffer,8);
@@ -50,7 +50,7 @@ export async function openModel(artifact:string){
         return published;
     }
     const started=performance.now();
-    let contract:{contract_id:string;abi_version:string;datasets:WireDataset[];relations:Omit<RelationSymbol,'kind'>[];types:{name:string;logical:string;storage:string}[];codec_module:string};
+    let contract:{contract_id:string;abi_version:string;datasets:WireDataset[];relations:Omit<RelationSymbol,'kind'>[];types:{name:string;logical:string;storage:string;preferred?:boolean}[];codec_module:string};
     try{
         contract=request('ontology/model',{method:'contract',input:{}});
         if(contract.abi_version!==MODEL_ABI_VERSION)throw Error('Unsupported model proof ABI '+contract.abi_version);
@@ -60,7 +60,14 @@ export async function openModel(artifact:string){
         if(!presentations||!semantics)throw Error('Model must publish independent semantic and presentation contracts');
         for(const t of contract.types){
             types[t.name]=business(t.logical,t.storage);
-            if(types[t.name].kind==='nominal'&&!Object.hasOwn(sharedTypes,types[t.name].name??''))types[t.name].displayName=t.name;
+            if(t.preferred!==false&&types[t.name].kind==='nominal'&&!Object.hasOwn(sharedTypes,types[t.name].name??''))types[t.name].displayName=t.name;
+        }
+        const typesByLogical=new Map(Object.values(types).map(type=>[type.modelLogical,type]));
+        for(const type of typesByLogical.values()){
+            const reference=/^Reference\(([^()]+)\)$/.exec(type.modelLogical??'');
+            if(!reference)continue;
+            const target=typesByLogical.get(reference[1]);
+            type.displayName='Reference('+(target?show(target):reference[1])+')';
         }
     }catch(e){worker.postMessage({close:true});throw e;}
     stats.contractMs=performance.now()-started;
@@ -85,14 +92,16 @@ export async function openModel(artifact:string){
             stats.checkMs.push(performance.now()-start);
             const fields:Record<string,Type>=Object.create(null);
             for(const c of checked.columns){const t=business(c.logical,c.type);fields[c.name]=c.nullable?{kind:'option',inner:t}:t;}
-            return {element:{kind:'schema',fields},container:checked.container,receipt:checked.receipt,maxRows:checked.max_rows??undefined,plan:{checked,constants:encoded.constants,parameterTypes:encoded.parameterTypes}};
+            return {element:{kind:'schema',fields},container:checked.container,receipt:checked.receipt,hasTotal:typeof checked.total_sql==='string'&&checked.container==='table',maxRows:checked.max_rows??undefined,plan:{checked,constants:encoded.constants,parameterTypes:encoded.parameterTypes}};
         }
     };
-    function bind(plan:unknown,parameters:unknown[]){
+    function bind(plan:unknown,parameters:unknown[],total=false){
             const {checked,constants,parameterTypes}=plan as {checked:WireTemplate;constants:Map<number,unknown>;parameterTypes:Map<number,Type>};
             const bindings:any[]=[];
             // Scan SQL tokens: placeholders in quoted text/comments are not bindings.
-            const sql=checked.sql.replace(/'(?:''|[^'])*'|"(?:""|[^"])*"|--[^\n]*|\/\*[\s\S]*?\*\/|\?(\d+)|:__dari_(\d+)/g,(token,constant,parameter)=>{
+            const template=total?checked.total_sql:checked.sql;
+            if(!template)throw Error('Model transform contradicts published total row count capability');
+            const sql=template.replace(/'(?:''|[^'])*'|"(?:""|[^"])*"|--[^\n]*|\/\*[\s\S]*?\*\/|\?(\d+)|:__dari_(\d+)/g,(token,constant,parameter)=>{
                 if(constant===undefined&&parameter===undefined)return token;
                 const index=Number(parameter);
                 const value=constant!==undefined?checked.bindings[Number(constant)-1]:constants.has(index)?constants.get(index):parameters[index];

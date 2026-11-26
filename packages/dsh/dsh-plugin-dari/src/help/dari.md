@@ -37,6 +37,9 @@ data top = query! {
 
 query_remote! 投影维度和度量时，模型对完整输入按所投影维度聚合。take 限制的是聚合后的输出行数，不截断参与聚合的原始数据。只有逐对象指标才使用 group_by_identity(a)。
 
+有精确总数需求时，可写 `data total = total_rows(page);`，其中 `page` 是同一稿件中以 `order_by(...) |> take(N)` 结束、且模型支持精确总数的远端清单。总数按清单的筛选、分组和投影口径在最终截取前计算。空清单的总数为 0。结果可在同一次交付中通过 `UseValue(ref = total)` 引用。 表格直接使用支持精确总数的远端清单时，默认显示总数。清单截取时同时显示实际展示条数。
+
+
 ```telora
 data rows = query_remote! {
     let a = from(demo::Items);
@@ -108,7 +111,7 @@ semi_join/anti_join 用 EXISTS/NOT EXISTS 保留或排除左侧行，右侧重�
 
 远端投影前，字段引用属于具体 from/connect 节点，group_by_identity 不合并节点成员；投影后，通过结果绑定引用新的列。project 改变行 Schema，distinct 保留该 Schema；写 `let output = rows |> project({...}) |> distinct(); output |> order_by(asc(output.field))`，不要继续用投影前名称引用新列。
 
-有限算术、lookup、unwrap_or!、round(value,precision)、concat、case_when、is_some/is_none、difference/ratio/growth_rate 放在前序 data 或 query! 中。整数余数用 `%`，除零或余数除零返回空值。map_opt(optional_row,$.field) 投影可选行字段。in_subnet/not_in_subnet(address,"192.168.1.0/24") 在 query! 中筛选已投影 IPv4 字段，非规范地址为空，子网必须规范且主机位为零。有限补充数据用 `table([{name:"目标",value:1}])`；空表必须声明 Table(Schema(...))。
+有限算术、lookup、unwrap_or!、round(value,precision)、concat、case_when、is_some/is_none、difference/ratio/growth_rate 放在前序 data 或 query! 中。整数余数用 `%`，除零或余数除零返回空值。map_opt(optional_row,$.field) 投影可选行字段。in_subnet/not_in_subnet(address,"192.168.1.0/24") 在 query! 中筛选已投影 IPv4 字段，非规范地址为空，子网必须规范且主机位为零。query_remote! 也可对声明了 InSubnet 或 NotInSubnet 的 IPv4 维度使用对应函数，CIDR 使用字符串字面量。有限补充数据用 `table([{name:"目标",value:1}])`；空表必须声明 Table(Schema(...))。
 
 等值标签映射用 lookup(value, [{value, label}, ...])：非空静态数组、键唯一且与输入业务类型一致、label 类型一致；未命中或输入为空返回 None，可按口径使用 value.unwrap_or!(default_expr)。前置 unwrap_or!(value,default_expr) 与后置形式等价，默认表达式只在 None 时求值，类型为 Option(T) × T → T。稳定业务编码用模型映射，任务显示标签用 lookup。例如 query! 的 project 字段：
 
@@ -138,7 +141,7 @@ ratio(a,b) / growth_rate(a,b) 返回 Option(Ratio)；输入为空、ratio 分母
 
 时间转换用 to_epoch_millis(t)、to_datetime_utc(t)、to_datetime_tz(t,ctx.tz)，地区参数为 TimeZone；DateTimeTz 保留偏移和 IANA 时区。EpochMillis 可加减整数毫秒偏移，两个 EpochMillis 相减得到 Int 时长。时间比较、排序按瞬时值进行，日历分桶用下文的 calendar_bucket，时间显示见图表分册的“时间展示”。
 
-time_windows({epoch_millis:ctx.now,time_zone:ctx.tz},{unit:TimeUnit::Day,count:3,mode:WindowMode::Complete}) 返回从早到晚的窗口。unit 为 TimeUnit::Minute/Hour/Day/Week/Month/Quarter/Year，mode 为 WindowMode::Complete/Current/Rolling，均须检查期确定。每项含 label、zone、start/end；边界含 epoch_millis/date_time_utc/rfc3339。参数可写 windows[0].start.epoch_millis；窗口为 [start,end)。
+time_windows({epoch_millis:ctx.now,time_zone:ctx.tz},{unit:TimeUnit::Day,count:3,mode:WindowMode::Complete}) 返回从早到晚的窗口。unit 为 TimeUnit::Minute/Hour/Day/Week/Month/Quarter/Year，mode 为 WindowMode::Complete/Current/Rolling，均须检查期确定。每项含 label、zone、start/end；边界含 epoch_millis/date_time_utc/rfc3339。参数可写 windows[0].start.epoch_millis；窗口为 [start,end)。 Minute 和 Hour 使用固定经过时长。Complete 和 Current 从当前本地分钟或小时边界向前计算，Current 包含当前窗口。Rolling 以捕获的当前时刻为终点。分钟和小时标签带时区偏移，便于区分夏令时回拨时重复的本地时间。
 
 ### 日历区间
 
@@ -212,6 +215,6 @@ Answer 的图表为 SVG 附件与 Markdown 图片，Report 内嵌图表；Table 
 
 dari_check 失败时返回 CheckFailed 文本，列出行列位置、相关声明与可确定的修复建议。尽量一次收集独立错误和已发现的告警，分别列出，每类最多展示 20 条并提示剩余数量；告警不单独导致检查失败。类型及计划错误会说明期望与实际、错误原因和适用的修复方式。语法恢复以可靠的括号或声明边界为限；上游声明失败时，依赖它的内容等待修复后再检查。检查失败的稿件不会执行或发布结果。
 
-运行期输入、数据与展示错误采用 SubmitFailed 文本并定位负责节点。输入编码错误应修正输入；模型/context 版本变化后重新检查同一稿件；模型结果违背已证明契约属于实现问题，不靠放宽类型、删条件或伪造数据规避。
+同一稿件和契约下，check 通过而 submit 失败，默认按实现缺陷处理。SubmitFailed 应定位负责节点并说明原因。执行后才能确定的情形包括实际输入或上下文值不满足要求、查询为空而组件要求有数据、稿件或契约在两次调用间变化，以及数据库或交付服务故障。算子缺失、SQL lowering 错误或模型结果违背已证明的契约，应修复实现。保持业务条件和类型约束。
 
 `$.x.y` 按输入行类型逐级选择记录字段；`$.x?.y` 在 x 为 None 时整个选择器返回 None，否则继续取字段。`?` 要求 Option，返回类型为 Option(最终字段类型)，不叠加 Option。普通 `.` 不隐式穿透 Option。`$` 只在组件字段配置或 map_opt 的行上下文中使用。UseValue(ref = prepared.value) 使用具名数据引用。

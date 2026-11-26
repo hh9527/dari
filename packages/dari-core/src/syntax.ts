@@ -53,7 +53,7 @@ export function parse(source:string,findings?:Fault[]):Node[]{
  const declarations:Node[]=[];
  while(!is('<eof>')){
   const start=pos;let name:string|undefined;
-  try{const t=take();if(!['type','data','report','answer'].includes(t.text))throw new Fault('Use type, data, report or answer declarations',t.at);name=t.text==='answer'?'answer':ident();const annotation=t.text==='data'&&eat(':')?type():undefined;if(t.text==='answer'&&is('='))throw new Fault('Use answer tree! { Answer [...] }; without =',ts[pos].at);if(t.text!=='answer')need('=');const value=t.text==='type'?type():expr();need(';');declarations.push({k:t.text==='type'?'type':'declaration',declarationKind:t.text,name,value,annotation,at:t.at});}
+  try{const t=take();if(!['type','data','report','answer'].includes(t.text))throw new Fault('Use type, data, report or answer declarations',t.at);name=t.text==='answer'?'answer':ident();const annotation=t.text==='data'&&eat(':')?type():undefined;if(t.text==='answer'&&is('='))throw new Fault('Use answer tree! { Answer [...] }; without =',ts[pos].at);if(t.text!=='answer')need('=');if(t.text==='type'&&is('enum')&&ts[pos+1]?.text==='{')throw new Fault('Enum declarations belong to the model. Use a published Type::Variant or a type alias.',ts[pos].at);const value=t.text==='type'?type():expr();need(';');declarations.push({k:t.text==='type'?'type':'declaration',declarationKind:t.text,name,value,annotation,at:t.at});}
   catch(error){report(error);if(name)declarations.push({k:'invalid',name,at:ts[start].at});nextDeclaration(start);}
  }
  return declarations;

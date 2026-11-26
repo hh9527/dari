@@ -28,6 +28,7 @@ export interface ReferenceEdge {
 export interface RetrievalIndex {
   revision: string;
   knowledge: SemanticGraph;
+  canonicalTypeIds?: ReadonlyMap<string, string>;
   contract: unknown;
   meta: Record<string, unknown>;
   terms: Term[];

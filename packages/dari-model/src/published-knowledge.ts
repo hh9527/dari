@@ -143,6 +143,6 @@ export function derivePublishedKnowledge(input: unknown, presentation?: unknown,
   });
   const result:RetrievalIndex={ revision: input.revision, knowledge: graph, contract: { knowledge_contract: input.knowledge_contract, intent_contract: input.intent_contract, addressing: input.addressing },
     meta: { format: 'oks-knowledge-v3', revision: input.revision, roots: graphRoots, counts: Object.fromEntries(graphRoots.map(root => [root, Object.keys(graph[root] ?? {}).length])) },
-    terms, keys: new Set(graph.items.map(item => item.key)), links: edges };
+    terms, canonicalTypeIds: typeIds.canonical, keys: new Set(graph.items.map(item => item.key)), links: edges };
   return owned?finishOwnedKnowledge(result,input):result;
 }

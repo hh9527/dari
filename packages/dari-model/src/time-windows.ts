@@ -2,11 +2,13 @@ import {Temporal} from '@js-temporal/polyfill';
 import {isRecord} from './util.ts';
 export const TIME_WINDOWS_VERSION=2;
 export class TimeWindowValidationError extends Error {}
-type Unit='year'|'quarter'|'month'|'week'|'day';
+export const TIME_WINDOW_UNITS=['Minute','Hour','Day','Week','Month','Quarter','Year'] as const;
+const units=TIME_WINDOW_UNITS.map(unit=>unit.toLowerCase());
+type Unit=Lowercase<(typeof TIME_WINDOW_UNITS)[number]>;
 export type TimeWindowOptions={unit:Unit;count:number;mode:'complete'|'current'|'rolling'};
 export function timeWindowOptions(raw:unknown):TimeWindowOptions {
  if(!isRecord(raw)||Object.keys(raw).some(k=>!['unit','count','mode'].includes(k)))throw new TimeWindowValidationError('time_windows options are {unit,count,mode}');
- if(typeof raw.unit!=='string'||!['year','quarter','month','week','day'].includes(String(raw.unit)))throw new TimeWindowValidationError('time windows unit must be year/quarter/month/week/day');
+ if(typeof raw.unit!=='string'||!units.includes(raw.unit))throw new TimeWindowValidationError('time windows unit must be '+units.join('/'));
  if(!Number.isSafeInteger(raw.count)||Number(raw.count)<1||Number(raw.count)>50)throw new TimeWindowValidationError('time windows count must be 1..50');
  if(typeof raw.mode!=='string'||!['complete','current','rolling'].includes(String(raw.mode)))throw new TimeWindowValidationError('time windows mode must be complete/current/rolling');
  return raw as TimeWindowOptions;
@@ -26,13 +28,17 @@ export function timeWindows(context:unknown,raw:unknown){
  if(a.unit==='month')date=date.with({day:1});
  if(a.unit==='week')date=date.subtract({days:date.dayOfWeek-1});
  const duration=(n:number)=>a.unit==='year'?{years:n}:a.unit==='quarter'?{months:n*3}:a.unit==='month'?{months:n}:a.unit==='week'?{weeks:n}:{days:n};
- const shifted=(n:number)=>a.mode==='rolling'?now.add(duration(n),{overflow:'constrain'}):date.add(duration(n),{overflow:'constrain'}).toZonedDateTime(zone);
+ const clockUnit=a.unit==='minute'||a.unit==='hour'?a.unit:undefined;
+ const clockStart=clockUnit&&a.mode!=='rolling'?now.round({smallestUnit:clockUnit,roundingMode:'floor'}):now;
+ const shifted=(n:number)=>clockUnit
+  ?clockStart.add(clockUnit==='hour'?{hours:n}:{minutes:n})
+  :a.mode==='rolling'?now.add(duration(n),{overflow:'constrain'}):date.add(duration(n),{overflow:'constrain'}).toZonedDateTime(zone);
  const local=(z:Temporal.ZonedDateTime)=>z.toPlainDateTime().toString({fractionalSecondDigits:z.millisecond?3:0})+z.offset;
  const boundary=(z:Temporal.ZonedDateTime)=>({epochMillis:z.epochMilliseconds,dateTimeUtc:z.toInstant().toString({fractionalSecondDigits:3}),rfc3339:local(z)});
  return Array.from({length:a.count},(_,i)=>{
   const n=i-a.count+(a.mode==='current'?1:0),start=shifted(n),end=shifted(n+1);
   if(start.epochMilliseconds>=end.epochMilliseconds)throw new TimeWindowValidationError('time_windows interval has no elapsed time in timezone '+zone+'; choose another calendar range');
-  const label=a.mode==='rolling'?local(start):a.unit==='year'?String(start.year).padStart(4,'0'):a.unit==='quarter'?`${start.year}-Q${Math.floor((start.month-1)/3)+1}`:a.unit==='month'?start.toPlainDate().toString().slice(0,7):start.toPlainDate().toString();
+  const label=clockUnit||a.mode==='rolling'?local(start):a.unit==='year'?String(start.year).padStart(4,'0'):a.unit==='quarter'?`${start.year}-Q${Math.floor((start.month-1)/3)+1}`:a.unit==='month'?start.toPlainDate().toString().slice(0,7):start.toPlainDate().toString();
   return {label,zone,start:boundary(start),end:boundary(end)};
  });
  }catch(error){if(error instanceof RangeError)throw new TimeWindowValidationError(error.message,{cause:error});throw error;}

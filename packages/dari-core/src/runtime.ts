@@ -1,3 +1,4 @@
+import {registerSqliteRegexp} from './database.ts';
 function readProjection(row:any,path:readonly string[]):any {
  let value=row;
  for(const segment of path){const unwrap=segment.endsWith('?'),key=unwrap?segment.slice(0,-1):segment;value=value[key];if(unwrap){if(value===null||value?.tag==='None')return null;if(value?.tag==='Some')value=value.value;}}
@@ -36,12 +37,7 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
  if(p.contextContractId!==execution.contextContractId)throw Error(renderDiagnostics(p.source,[{at:0,message:'Context contract changed; check the plan again',stage:'runtime',code:'stale-context-proof',reason:'当前 context 的类型契约与检查时不同',suggestion:'确认上下文契约后重新检查同一稿件，再提交'}],'SubmitFailed'));
  registerCalendarFunctions(db);
  db.registerFunction('dari_utc_bucket',{deterministic:true},(value:any,unit:any)=>utcBucket(value,unit));
- const patterns=new Map<string,RegExp>();
- db.registerFunction('regexp',{deterministic:true},(pattern:any,input:any)=>{
-  if(pattern===null||input===null)return null;
-  let regex=patterns.get(String(pattern));if(!regex){regex=new RegExp(String(pattern));patterns.set(String(pattern),regex);}
-  return Number(regex.test(String(input)));
- });
+ registerSqliteRegexp(db);
  db.registerFunction('dari_in_subnet',{deterministic:true},(address:any,subnet:any)=>address===null||subnet===null?null:inSubnet(address,subnet));
  for(const [name,run] of Object.entries(timeFunctions))db.registerFunction('dari_'+name,{deterministic:true,varargs:true},(...args:any[])=>args.some(v=>v===null)?null:(run as (...args:any[])=>any)(...args));
  for(const [name,fn]of Object.entries(p.host?.functions??{}))if(fn.sql)db.registerFunction('dari_host_'+name,{deterministic:true,varargs:true},(...args:any[])=>fn.run(args.map((value,i)=>fn.sql!.jsonArgs?.includes(i)&&value!==null?JSON.parse(value):value)) as any);
@@ -64,16 +60,22 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
   acquisitions.push({binding:name,kind:'local',sql:text,parameters:args,startedAt,elapsedMillis:performance.now()-start,rowCount:rows.length});
   return rows;
  }
+ const remoteTotals=new Map<string,number>();
  const remoteRows=new Map<string,SqlRow[]>(),materialized=new Map<string,string>();
  function remote(name:string):SqlRow[]{
   const cached=remoteRows.get(name);if(cached)return cached;
   const b=p.bindings.get(name)!,bound=b.result?.maxRows;
   if(bound===undefined||bound>MAX_RESULT_ROWS)throw Error('Remote execution requires a proven bound <= '+MAX_RESULT_ROWS+': '+name);
   const parameters=b.parameters!.map(value),startedAt=new Date().toISOString(),start=performance.now();queries++;
-  const result=model!.execute(b.modelPlan,parameters);
+  const result=model!.execute(b.modelPlan,parameters,b.includeTotal);
   const expected=Object.entries(b.result!.element.fields!).map(([name,t])=>({name,...storage(t)}));
   if(!result||!Array.isArray(result.rows)||!Array.isArray(result.columns)||result.max_rows===undefined||!Number.isInteger(result.max_rows)||result.max_rows<0||result.max_rows>bound||result.columns.length!==expected.length||result.columns.some((c,i)=>c.name!==expected[i].name||c.type!==expected[i].type||c.nullable!==expected[i].nullable))throw Error('Model transform contradicts published type/bound: '+name);
   if(result.rows.length>bound||result.rows.length>result.max_rows)throw Error('Model result exceeds published row bound: '+name);
+  if(b.includeTotal){
+   const total=result.total;
+   if(total===undefined||!Number.isSafeInteger(total)||total<result.rows.length)throw Error('Model transform contradicts published total row count: '+name);
+   remoteTotals.set(name,total);
+  }
   const fields=b.result!.element.fields!;
   for(const row of result.rows)if(!row||typeof row!=='object'||Array.isArray(row)||Object.keys(row).length!==expected.length||Object.keys(row).some(key=>!Object.hasOwn(fields,key)))throw Error('Model result Schema does not match the published fields: '+name);
   const rows=result.rows.map(row=>convert(b.result!.element,row,'decode'));
@@ -117,6 +119,11 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
  }
  function validate(t:Type,v:any):boolean {if(t.kind==='option')return v===null||validate(t.inner!,v);if(t.kind==='nominal')return validate(t.inner!,v);if(t.kind==='schema')return v!==null&&typeof v==='object'&&Object.entries(t.fields!).every(([k,t])=>Object.hasOwn(v,k)&&validate(t,v[k]));if(t.name==='Int'||t.name==='EpochMillis')return Number.isSafeInteger(v);if(t.name==='Float')return typeof v==='number'&&Number.isFinite(v);if(t.name==='Bool')return typeof v==='boolean';if(t.name==='Rfc3339')return typeof v==='string'&&/^\d{4}-\d\d-\d\dT.*(?:Z|[+-]\d\d:\d\d)$/.test(v)&&Number.isFinite(Date.parse(v));return typeof v==='string';}
  function value(n:Node):any {
+  if(n.k==='call'&&n.name==='total_rows'){
+   const name=n.args[0].path[0];
+   binding(name);
+   return remoteTotals.get(name)!;
+  }
   if(n.calendarBucketUnit)return calendarBucket(value(n.args[0]),n.calendarBucketUnit,value(n.args[2]));
   if(n.utcBucketUnit)return utcBucket(value(n.args[0]),n.utcBucketUnit);
   if(n.calendarFunction)return calendarFunctions[n.name].run(n.args.map(value));
@@ -209,6 +216,7 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
     if(p.types.get(n.name)?.kind==='scalar'&&timeType(p.types.get(n.name)!)){if(n.args[0].k==='literal'){args.push(value(n));return '?';}return 'dari_parse_'+p.types.get(n.name)!.name+'('+expr(n.args[0],input,qualifier)+')';}
     if(p.host?.functions[n.name]?.sql)return 'dari_host_'+n.name+'('+n.args.map((a:Node)=>expr(a,input,qualifier)).join(', ')+')';
     if(n.name==='not_none')return expr(n.args[0],input,qualifier);
+    if(n.name==='total_rows'){args.push(value(n));return '?';}
     if(n.name==='map_opt'){args.push(encodeValue(expressionType(n),value(n)));return '?';}
     if(n.name==='case_when')return '(CASE WHEN '+expr(n.args[0],input,qualifier)+' THEN '+expr(n.args[1],input,qualifier)+' ELSE '+expr(n.args[2],input,qualifier)+' END)';
     if(n.name==='concat')return '('+n.args.map((a:Node)=>expr(a,input,qualifier)).join(' || ')+')';
@@ -275,7 +283,7 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
   try{return globalBinding(name);}catch(error){
    const message=(error as Error).message,b=p.bindings.get(name);
    if(!b||/^(SubmitFailed|CheckFailed)\n/.test(message))throw error;
-   const contract=/Model (transform contradicts|result exceeds)|projection does not match|contract changed/i.test(message);
+   const contract=/Model (transform contradicts|result exceeds|result Schema does not match)|projection does not match|contract changed|no such function:|Unsupported SQL (function|expression)/i.test(message);
    throw Error(renderDiagnostics(p.source,[{at:b.ast.at,message,stage:'runtime',asset:b.ast.owner??name,code:contract?'runtime-contract':b.ast.name==='input'?'runtime-input':'runtime-value',...(contract?{reason:'运行实现或结果违背检查期已证明的契约',suggestion:'核对模型及宿主版本并修复实现；不要通过放宽类型或上界掩盖此错误'}:b.ast.name==='input'?{reason:'运行期输入不符合声明的类型或编码',suggestion:'核对输入字段、业务类型编码及可空性；不要修改 Schema 来掩盖错误值'}:{})}],'SubmitFailed'));
   }finally{scopes=saved;}
 
@@ -335,11 +343,18 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
  function renderChart(n:Node):import('./host.ts').FigureOutput {
   const a=Object.fromEntries(n.attrs.map((f:Node)=>[f.name,f.value]));const ref=(key:string)=>a[key].path[0];
   for(const key of ['data','nodes'])if(a[key]){const b=p.bindings.get(ref(key));if(b?.result?.maxRows===undefined||b.result.maxRows>MAX_PRESENTATION_ROWS||binding(ref(key)).length>MAX_PRESENTATION_ROWS)throw Error('Presentation requires a proven and actual bound <= '+MAX_PRESENTATION_ROWS);}
+  const withTotal=(figure:import('./host.ts').FigureOutput,shown:number):import('./host.ts').FigureOutput=>{
+   const total=figure.kind==='table'?remoteTotals.get(ref('data')):undefined;
+   if(total===undefined)return figure;
+   const summary=shown<total?`共 ${total} 条，展示前 ${shown} 条`:`共 ${total} 条`;
+   return {...figure,content:summary+'\n\n'+figure.content,
+    html:'<p>'+html(summary)+'</p>'+(figure.html??''),dataText:summary+'\n\n'+(figure.dataText??figure.content)};
+  };
   if(n.checkedSpec&&p.host){
    const rows=(name:string)=>binding(name).map((row:any)=>Object.fromEntries(Object.entries(row).map(([k,v]:[string,any])=>[k,v&&typeof v==='object'&&typeof v.tag==='string'?display(v):v])));
    // Resolve inputs outside the rendering catch: an upstream failure keeps its own location.
    const data=rows(ref('data')).map((row:any)=>({...row,...Object.fromEntries((n.checkedPaths??[]).map((path:string[])=>[path.join('.'),readProjection(row,path)]))})),nodes=a.nodes?rows(ref('nodes')):undefined;
-   try{return p.host.renderFigure(n.name,presentationSpec(n),data,n.checkedFields,nodes);}
+   try{return withTotal(p.host.renderFigure(n.name,presentationSpec(n),data,n.checkedFields,nodes),data.length);}
    catch(error){
     const asset=[...p.bindings].filter(([,b])=>b.kind==='tree'&&b.ast.root.at<=n.at).sort((a,b)=>b[1].ast.root.at-a[1].ast.root.at)[0]?.[0];
     const message=n.name+'(data = '+ref('data')+'): '+(error as Error).message;
@@ -352,7 +367,7 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
    if(!rows.length&&!spec.allow_no_data)throw Error('Table has no data; set allow_no_data:True when an empty result is acceptable');
    const content='| '+columns.map((key:string)=>md(labels[key]??key)).join(' | ')+' |\n| '+columns.map(()=>'---').join(' | ')+' |\n'+rows.map((row:any)=>'| '+columns.map((key:string)=>md(presented(fields[key],row[key],spec.precision,spec.formats?.[key]))).join(' | ')+' |').join('\n');
    const tableHtml='<table><thead><tr>'+columns.map((key:string)=>'<th>'+html(labels[key]??key)+'</th>').join('')+'</tr></thead><tbody>'+rows.map((row:any)=>'<tr>'+columns.map((key:string)=>'<td>'+html(presented(fields[key],row[key],spec.precision,spec.formats?.[key]))+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
-   return {kind:'table',content,html:tableHtml,title:spec.title};
+   return withTotal({kind:'table',content,html:tableHtml,title:spec.title},rows.length);
   }
   if(n.name==='ColumnChart'){
    const rows=binding(ref('data')).map((row:any)=>({...row,...Object.fromEntries(['x','value'].map(key=>[a[key].path.join('.'),readProjection(row,a[key].path)]))})),x=field('x'),y=field('value'),width=Math.max(320,rows.length*80),height=240,max=Math.max(1,...rows.map((r:any)=>Number(r[y]??0)));

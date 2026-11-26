@@ -43,13 +43,12 @@ function terms(raw:unknown,key:string,optional=false):string[]{
 }
 /** Conceptual discovery returns existing query addresses; it never invents joins or grants operations. */
 function discoverQuery(graph:SemanticGraph,args:Record<string,unknown>){
-  if(!record(args)||Object.keys(args).some(k=>!['entity','props','values'].includes(k)))throw new Error('each query accepts {entity:string,props:[...],values?:[...]}');
+  if(!record(args)||Object.keys(args).some(k=>!['entity','member','value'].includes(k)))throw new Error('each query accepts {entity:string,member?:[...],value?:[...]}');
   if(typeof args.entity!=='string'||!args.entity.trim()||args.entity.length>200)throw new Error('query entity requires one nonempty term (at most 200 characters)');
-  const entity=[args.entity],props=terms(args.props,'props'),values=terms(args.values,'values',true);
-  if(!entity.length)throw new Error('entity requires at least one term');
-  if(!props.length&&!values.length)throw new Error('provide at least one props or values term');
+  const entity=[args.entity],props=terms(args.member,'member',true),values=terms(args.value,'value',true);
+  if(!props.length&&!values.length)throw new Error('provide at least one member or value term');
   const index=discoveryIndex(graph),matchedEntities=new Map<string,{q:string;score:number}[]>();
-  const unmatched:{entity:string[];props:string[];values:string[]}={entity:[],props:[],values:[]};
+  const unmatched:{entity:string[];member:string[];value:string[]}={entity:[],member:[],value:[]};
   for(const q of entity){
     const query=lexicalQuery(q),hits=[...index.entities].map(([id,words])=>({id,score:matchLexical(query,fields(words)).score})).filter(h=>h.score>0).sort((a,b)=>b.score-a.score||compare(a.id,b.id));
     if(!hits.length)unmatched.entity.push(q);
@@ -60,12 +59,12 @@ function discoverQuery(graph:SemanticGraph,args:Record<string,unknown>){
   const select=(p:Candidate)=>{let match=selected.get(p);if(!match)selected.set(p,match={props:[],values:[]});return match;};
   for(const q of props){
     const query=lexicalQuery(q),hits=candidates.map(p=>({p,score:matchLexical(query,fields(p.words)).score})).filter(h=>h.score>0).sort((a,b)=>b.score-a.score||compare(a.p.entity+'/'+a.p.dataset+'/'+a.p.property.name,b.p.entity+'/'+b.p.dataset+'/'+b.p.property.name));
-    if(!hits.length)unmatched.props.push(q);
+    if(!hits.length)unmatched.member.push(q);
     for(const hit of hits)select(hit.p).props.push(q);
   }
   for(const q of values){
     const query=lexicalQuery(q),hits=index.values.map(p=>({p,score:matchLexical(query,fields(p.words)).score})).filter(h=>h.score>0&&candidates.some(c=>c.property.types.includes(h.p.root))).sort((a,b)=>b.score-a.score||compare(a.p.id,b.p.id));
-    if(!hits.length)unmatched.values.push(q);
+    if(!hits.length)unmatched.value.push(q);
     for(const hit of hits)for(const p of candidates)if(p.property.types.includes(hit.p.root))select(p).values.push({q,id:hit.p.id,type:hit.p.root,facts:hit.p.fact});
   }
   const results=[...selected].map(([p,matched])=>({
@@ -76,34 +75,46 @@ function discoverQuery(graph:SemanticGraph,args:Record<string,unknown>){
         :['Count','CountDistinct'].includes(fact.aggregate)?'Int'
         :typeof fact.output_type==='string'?({Integer:'Int',Number:'Float',Text:'String',Boolean:'Bool'} as Record<string,string>)[fact.output_type]??fact.output_type
         :p.property.types.length===1?p.property.types[0]:'未声明类型';
-      return {id,type};
+      return {id,type,kind:id.includes('/dimensions/')?'dimension':'measure'};
     })
   })).sort((a,b)=>compare(a.entity+'/'+a.dataset+'/'+a.name,b.entity+'/'+b.dataset+'/'+b.name));
   return {entities:[...matchedEntities].map(([id,matched])=>({id,matched})),results,unmatched};
 }
 
 export function discoverConcepts(graph:SemanticGraph,args:Record<string,unknown>){
-  if(!record(args)||Object.keys(args).some(k=>k!=='queries')||!Array.isArray(args.queries)||!args.queries.length||args.queries.length>12)throw new Error('discover accepts {queries:[{entity:string,props:[...],values?:[...]}]} with 1..12 queries');
+  if(!record(args)||Object.keys(args).some(k=>k!=='queries')||!Array.isArray(args.queries)||!args.queries.length||args.queries.length>12)throw new Error('discover accepts {queries:[{entity:string,member?:[...],value?:[...]}]} with 1..12 queries');
   return {queries:args.queries.map(query=>{
     if(!record(query))throw new Error('each discovery query must be an object');
     return {query,...discoverQuery(graph,query)};
   })};
 }
 
-export function renderConcepts(_args:unknown,value:{data:ReturnType<typeof discoverConcepts>}){
+export function renderConcepts(_args:unknown,value:{data:ReturnType<typeof discoverConcepts>;contracts?:Record<string,{dataset?:string;symbol?:string;type?:string}>;clocks?:Record<string,string>}){
+  const clockLines=new Map<string,string>();
   const groups=new Map<string,Map<string,Map<string,string>>>();
   for(const query of value.data.queries)for(const item of query.results){
     let datasets=groups.get(item.entity);
     if(!datasets)groups.set(item.entity,datasets=new Map());
-    let entries=datasets.get(item.dataset);
-    if(!entries)datasets.set(item.dataset,entries=new Map());
-    for(const entry of item.entries)entries.set(entry.id.slice(item.dataset.length+1),entry.type);
+    const dataset=item.entries.map(entry=>value.contracts?.[entry.id]?.dataset).find(Boolean)??item.dataset;
+    let entries=datasets.get(dataset);
+    if(!entries)datasets.set(dataset,entries=new Map());
+    const clockId=value.clocks?.[item.dataset];
+    const clock=clockId?value.contracts?.[clockId]:undefined;
+    if(clock?.symbol&&clock.type)clockLines.set(dataset,`- 主时间维度：\`${clock.symbol}: ${clock.type}\`，支持窗口筛选`);
+    for(const entry of item.entries){
+      if(entry.id===clockId&&clock?.symbol&&clock.type)continue;
+      const contract=value.contracts?.[entry.id];
+      const name=contract?.dataset&&contract?.symbol ? contract.symbol : entry.id;
+      entries.set(entry.kind+' '+name,contract?.type??entry.type);
+    }
   }
   const lines:string[]=[];
   for(const [entity,datasets] of [...groups].sort(([a],[b])=>compare(a,b))){
     lines.push('# '+entity,'');
     for(const [dataset,entries] of [...datasets].sort(([a],[b])=>compare(a,b))){
       lines.push('## '+dataset,'');
+      const clockLine=clockLines.get(dataset);
+      if(clockLine)lines.push(clockLine);
       for(const [name,type] of [...entries].sort(([a],[b])=>compare(a,b)))lines.push('- '+name+': '+type);
       lines.push('');
     }

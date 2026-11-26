@@ -1,4 +1,9 @@
 import assert from 'node:assert/strict';
+import {check,resolve} from '@local/dari-core';
+import {DatabaseSync} from 'node:sqlite';
+import {sqlite} from '../../../dari/src/adapters/sqlite.ts';
+import {TIME_WINDOW_UNITS} from '../../../dari-model/src/time-windows.ts';
+import {dariHost} from '../../../dari-model/src/dari-host.ts';
 import {timeWindows,timeWindowOptions} from '@local/dari-model';
 const context = (at:string, zone='Asia/Shanghai') => ({utc:{epochMillis:Date.parse(at)},tz:{client:{id:zone}}});
 const ctx = context('2026-10-19T11:41:03.456+08:00');
@@ -49,7 +54,7 @@ try {
   const max = await run({unit:'month',count:50,mode:'complete'});
   assert.equal(max.length,50);
   for (const rows of [complete,current,rolling,week,quarter,year,leap,dst,shortDay,longDay,midnightGap,atBoundary,max]) verify(rows);
-  for (const args of [null,[], 'encoded', {}, {unit:'hour',count:1,mode:'complete'}, {unit:['month'],count:1,mode:'complete'}, {unit:'month',count:1,mode:['complete']}, {unit:'month',count:0,mode:'complete'}, {unit:'month',count:51,mode:'complete'}, {unit:'month',count:1.5,mode:'complete'}, {unit:'month',count:1,mode:'guess'}, {unit:'month',count:1,mode:'complete',offset:480}]) {
+  for (const args of [null,[], 'encoded', {}, {unit:'second',count:1,mode:'complete'}, {unit:['month'],count:1,mode:'complete'}, {unit:'month',count:1,mode:['complete']}, {unit:'month',count:0,mode:'complete'}, {unit:'month',count:51,mode:'complete'}, {unit:'month',count:1.5,mode:'complete'}, {unit:'month',count:1,mode:'guess'}, {unit:'month',count:1,mode:'complete',offset:480}]) {
     assert.throws(()=>timeWindowOptions(args)); checks++;
   }
   for (const value of [null,{},context('2026-01-01T00:00:00Z','Mars/Olympus'),{utc:{epochMillis:'1790854863000'},tz:{client:{id:'UTC'}}}]) {
@@ -61,3 +66,37 @@ try {
 await assert.rejects(run({unit:'day',count:3,mode:'current'},context('2011-12-31T12:00:00+14:00','Pacific/Apia')),/no elapsed time/);
 const fold=await run({unit:'day',count:1,mode:'rolling'},context('2026-11-02T01:30:00-05:00','America/New_York'));
 assert.equal(fold[0].start.rfc3339,'2026-11-01T01:30:00-04:00');
+
+const db = new DatabaseSync(':memory:');
+try {
+  for (const unit of TIME_WINDOW_UNITS) {
+    for (const mode of ['Complete','Current','Rolling']) {
+      const source = `
+        data windows = time_windows(
+          {epoch_millis: EpochMillis(1792381263456), time_zone: TimeZone("Asia/Shanghai")},
+          {unit: TimeUnit::${unit}, count: 2, mode: WindowMode::${mode}}
+        );
+        data end = windows[1].end.rfc3339;
+        answer tree! { Answer [UseValue(ref = end)] };
+      `;
+      resolve(check(source,undefined,{host:dariHost}),sqlite(db));
+    }
+  }
+} finally {
+  db.close();
+}
+
+const hours = await run({unit:'hour',count:2,mode:'current'},
+  context('2026-11-01T01:30:00-05:00','America/New_York'));
+verify(hours);
+assert.deepEqual(hours.map(row=>row.start.rfc3339),[
+  '2026-11-01T01:00:00-04:00','2026-11-01T01:00:00-05:00'
+]);
+const spring = await run({unit:'hour',count:1,mode:'current'},
+  context('2026-03-08T01:30:00-05:00','America/New_York'));
+assert.equal(spring[0].end.rfc3339,'2026-03-08T03:00:00-04:00');
+const minutes = await run({unit:'minute',count:2,mode:'rolling'});
+verify(minutes);
+assert.equal(minutes[0].start.rfc3339,'2026-10-19T11:39:03.456+08:00');
+assert.equal(minutes[1].end.epochMillis,ctx.utc.epochMillis);
+console.log('time_windows: 21 check/resolve combinations, minute duration and DST hour boundaries passed');

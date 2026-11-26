@@ -11,7 +11,7 @@ import {tableMarkdown} from './view/table.ts';
 import {renderMarkdown} from './chart/markdown.ts';
 import {cleanChartSvg,REPORT_STYLE} from './chart/report.ts';
 import {Temporal} from '@js-temporal/polyfill';
-import {timeWindows,timeWindowOptions} from './time-windows.ts';
+import {TIME_WINDOW_UNITS,timeWindows,timeWindowOptions} from './time-windows.ts';
 // Structural ABI: the language package owns its types; the presentation host only reads them.
 const scalar=(name:string):Type=>({kind:'scalar',name});
 const schema=(fields:Record<string,Type>):Type=>({kind:'schema',fields});
@@ -24,7 +24,7 @@ const stackType=closedEnum('Stack',stackVariants);
 const barNames=new Set(['BarChart','GroupedBarChart','MultiBarChart','StackedBarChart']);
 const orientations=['Horizontal','Vertical'];
 const stackModes=['Absolute','Percent'];
-const timeUnits=['Minute','Hour','Day','Week','Month','Quarter','Year'];
+const timeUnits=[...TIME_WINDOW_UNITS];
 const windowModes=['Complete','Current','Rolling'];
 function enumOption(value:any,name:string,variants:string[],checking:boolean):string{
  const member=checking?value?.variant:value;
@@ -187,7 +187,7 @@ const componentContracts:Record<string,ComponentContract>=Object.fromEntries(Obj
  }
 }]));
 const host={
- contractId:'dari-host/v7',types:{Orientation:closedEnum('Orientation',orientations),StackMode:closedEnum('StackMode',stackModes),Stack:stackType,Axis:closedEnum('Axis',['Time','Category','Value']),TimeUnit:closedEnum('TimeUnit',timeUnits),WindowMode:closedEnum('WindowMode',windowModes)},formatValue,componentContracts,components:Object.keys(COMPONENT_KINDS),reportStyle:REPORT_STYLE,
+ contractId:'dari-host/v8',types:{Orientation:closedEnum('Orientation',orientations),StackMode:closedEnum('StackMode',stackModes),Stack:stackType,Axis:closedEnum('Axis',['Time','Category','Value']),TimeUnit:closedEnum('TimeUnit',timeUnits),WindowMode:closedEnum('WindowMode',windowModes)},formatValue,componentContracts,components:Object.keys(COMPONENT_KINDS),reportStyle:REPORT_STYLE,
  reportHtml(text:string,artifacts:Record<string,string>){return renderMarkdown(text,()=>{throw Error('Unexpected report fence');},(alt,href)=>{const svg=artifacts[href];if(!svg)throw Error('Missing report figure '+href);return '<figure>'+cleanChartSvg(svg)+'</figure>';});},
  checkFigure(name:string,spec:Record<string,unknown>,fields:Record<string,Type>,nodes?:Record<string,Type>){const normalized=presentationSpec(spec,name,fields);stacking(normalized,fields);const wide=wideSeries(name,normalized,fields);validate(name,wide.spec,wide.fields);if(name==='NetworkGraph'&&(!nodes?.id||!nodes.depth&&!(nodes.x&&nodes.y)))throw Error('NetworkGraph requires a nodes table with id and depth or x/y');if(name!=='NetworkGraph'&&nodes)throw Error('Only NetworkGraph accepts nodes');},
  renderFigure(name:string,raw:Record<string,unknown>,rows:Record<string,unknown>[],fields:Record<string,Type>,nodes?:Record<string,unknown>[]){

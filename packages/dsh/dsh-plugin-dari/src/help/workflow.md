@@ -11,20 +11,22 @@
 
 ## 知识定位
 
-去重领域词表由独立 VA 持有；主上下文不展开领域全文。dari_vocab 返回候选词，不提供知识地址，候选不代表词义等价。dari_kg_discover 每条 query 的 entity/props/values 只能逐字使用 dari_vocab 返回的词表原词（ASCII 英文），保持拼写和大小写。无合适原词时再次向 dari_vocab 对齐，不自行翻译、改写、缩写或拼接。routes 和 info 使用知识工具返回的真实 ID，不受检索词规则约束。
+去重领域词表由独立 VA 持有；主上下文不展开领域全文。dari_vocab 返回候选词，不提供知识地址，候选不代表词义等价。dari_kg_discover 每条 query 的 entity/member/value 只能逐字使用 dari_vocab 返回的词表原词（ASCII 英文），保持拼写和大小写。无合适原词时再次向 dari_vocab 对齐，不自行翻译、改写、缩写或拼接。routes 直接使用发现回执中的数据集公开路径，并以公开路径显示途经数据集和关系。info 优先使用发现结果中的公开符号，也接受知识 ID。这两个入口不受检索词规则约束。
 
-dari_kg_discover 按实体与属性定位；props 包含维度、度量和计数，values 可省略。具名值通过所属 Type 反查相关属性，与属性词命中合并。返回的知识地址和查询映射是后续依据；不从词汇拼造 ID，不自动认定计数就是去重实体数。
+dari_kg_discover 按实体与属性定位；member 包含维度、度量和计数，value 可省略。具名值通过所属 Type 反查相关属性，与属性词命中合并。优先使用返回的公开数据集、成员和类型符号，读取成员详情时，将数据集标题和成员短名用 `::` 连接，传给 `dari_kg_info`。详情中的枚举声明供查阅，稿件直接引用已发布的类型及其成员；不从词汇拼造 ID，不自动认定计数就是去重实体数。
+
+`Option(T)` 和 `Reference(T)` 是通用类型模板，直接阅读签名。需要了解 `Reference(demo::TenantById)` 的业务身份时，只查 `demo::TenantById` 的详情。
 
 仅当 dari_vocab 已逐字返回下列英文词时，才可这样检索：
 
 ```js
-dari_kg_discover({queries:[{entity:"item",props:["value"]}]})
-dari_kg_discover({queries:[{entity:"item",props:["count"],values:["active"]}]})
+dari_kg_discover({queries:[{entity:"item",member:["value"]}]})
+dari_kg_discover({queries:[{entity:"item",member:["count"],value:["active"]}]})
 ```
 
-`dari_kg_routes({from:"datasets/a",to:"datasets/b",via:["datasets/c"]})` 返回满足约束的最短路径集合。via 可省略，指定时按顺序经过这些 Dataset/Entity 根节点。回执包含方向、基数、完整连接键、角色 ID 和 guard；Entity 经承载其身份的 Dataset 进入路径。返回最多 20 条最短路径，超过时标记截断；没有路径时明确报告。via 表达业务必经节点。路径存在与聚合安全分别判断，后者依据具体度量约束。
+`dari_kg_routes({from:"demo::a",to:"demo::b",via:["demo::c"]})` 返回满足约束的最短路径集合。via 可省略，指定时按顺序经过这些 Dataset/Entity 根节点。回执给出公开数据集与关系路径、方向、基数及关系是否带限定条件；Entity 经承载其身份的 Dataset 进入路径。返回最多 20 条最短路径，超过时标记截断；没有路径时明确报告。via 表达业务必经节点。路径存在与聚合安全分别判断，后者依据具体度量约束。
 
-`dari_kg_info({ids:["datasets/items/measures/value"]})` 批量读取 1..64 个精确知识点，未知 ID 逐点报告。每点给出业务定义和查询短名称；启用类型化源码契约时，还附带模型发布的精确符号、逻辑类型和关系信息。Field.roles 的 Appellation/Reference/Classification/Metric 分别是称谓、指代、分类、指标；筛选和聚合能力由 Dimension/Measure 声明决定。
+`dari_kg_info({ids:["demo::items::value"]})` 批量读取 1..64 个精确知识点，未知 ID 逐点报告。每点给出业务定义和查询短名称；启用类型化源码契约时，还附带模型发布的精确符号、逻辑类型和关系信息。Field.roles 的 Appellation/Reference/Classification/Metric 分别是称谓、指代、分类、指标；筛选和聚合能力由 Dimension/Measure 声明决定。
 
 ## 统计与明细
 
@@ -42,3 +44,5 @@ dari_kg_discover({queries:[{entity:"item",props:["count"],values:["active"]}]})
 - 探索：按用户目标组织增量分析，最终需要报表时整合为 Report
 
 统计时区口径有实质歧义或 context 无有效时区时澄清；时间接口及日历窗口见语言手册。行为约束以工作纪律为准，本手册描述操作流程。
+
+查数据集读取自身说明。用 `dari_kg_discover` 按问题查找成员。

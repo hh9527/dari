@@ -11,3 +11,11 @@ assert(text.includes('x'.repeat(20000)));assert(text.includes('读取失败：Un
 const different=renderInfo({}, {data:{items:[{id:'x',kind:'Dimension',facts:{ops:['Eq'],filters:['Ne'],canonical_order:['A'],order:['B']}}]}})[0].text!;
 assert(different.includes('- filters:'));assert(different.includes('- order:'));
 console.log('Info Markdown: exact query names, alias equality, literals, expressions, errors and untruncated definitions passed');
+
+const computed=renderInfo({}, {data:{items:[{
+  id:'datasets/alarm/measures/score',kind:'Measure',
+  dari:{dataset:'demo::alarm',symbol:'score',type:'Int'},
+  facts:{aggregate:'Count',computed:{op:'Add',left:'severe_count',right:'critical_count'}}
+}]}})[0].text!;
+assert.match(computed,/计算口径 severe_count \+ critical_count/);
+assert.doesNotMatch(computed,/统计查询范围内的记录数|aggregate = Count/);
