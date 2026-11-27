@@ -9,7 +9,7 @@ import {MODEL_ABI_VERSION,type EncodedIntent,type ProofReceipt} from '@local/dar
 import type {Type} from '@local/dari-core';
 import {primaryCodecs} from '@local/dari-core/codecs';
 
-type WireMember={id:string;symbol:string;kind:'dimension'|'measure';logical:string;storage:string;nullable:boolean};
+type WireMember={id:string;symbol:string;kind:'dimension'|'measure';logical:string;storage:string;nullable:boolean}&Partial<import("../../dari-core/src/model.ts").MemberCapabilities>;
 type WireDataset={id:string;symbol:string;members:WireMember[]};
 type WireTemplate={pivot?:import('../../dari-core/src/model.ts').PivotOptions|null;container:'table'|'option';receipt:ProofReceipt;sql:string;total_sql?:string|null;bindings:any[];columns:(ResultColumn&{logical:string})[];max_rows:number|null};
 export async function openModel(artifact:string){
@@ -77,7 +77,8 @@ export async function openModel(artifact:string){
         for(const m of item.members){
             if(Object.hasOwn(members,m.symbol))throw Error('Ambiguous published model member '+item.symbol+'.'+m.symbol);
             const type=business(m.logical,m.storage);
-            members[m.symbol]={kind:m.kind,id:m.id,symbol:m.symbol,owner:item.id,type:m.nullable?{kind:'option',inner:type}:type};
+            const capabilities=m.filters===undefined?undefined:{projectable:m.projectable!,groupable:m.groupable!,filters:m.filters,orderable:m.orderable!};
+            members[m.symbol]={capabilities,kind:m.kind,id:m.id,symbol:m.symbol,owner:item.id,type:m.nullable?{kind:'option',inner:type}:type};
         }
         if(Object.hasOwn(datasets,item.symbol))throw Error('Ambiguous published Dataset '+item.symbol);
         datasets[item.symbol]={kind:'dataset',id:item.id,symbol:item.symbol,members};

@@ -11,8 +11,9 @@ export type ValueCodec={variants?:readonly string[];order?:readonly string[];ope
 export type DatasetSymbol = {
     kind:'dataset'; id:string; symbol:string; members:Record<string,MemberSymbol>;
 };
+export type MemberCapabilities = {projectable:boolean;groupable:boolean;filters:readonly string[];orderable:boolean};
 export type MemberSymbol = {
-    kind:'dimension'|'measure'; id:string; symbol:string; owner:string; type:Type;
+    kind:'dimension'|'measure'; id:string; symbol:string; owner:string; type:Type; capabilities?:MemberCapabilities;
 };
 export type RelationSymbol={kind:'relation';id:string;symbol:string;from:string;to:string;fromCardinality:'One'|'Optional'|'Many0'|'Many1';toCardinality:'One'|'Optional'|'Many0'|'Many1'};
 export type NodeType = {kind:'node';index:number;id:string;dataset:DatasetSymbol};

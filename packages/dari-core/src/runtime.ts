@@ -355,7 +355,12 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
   return p.host?.formatValue?p.host.formatValue(t,v,digits,format):formatValue(t,v,digits,format);
  }
  function resolvedTimeFormat(format:any):TimeFormat|undefined {return format?{...(format.date_style?{date_style:format.date_style}:{}),...(format.time_zone?{time_zone:value(format.time_zone)}:{})}:undefined;}
- function presentationSpec(n:Node):any {return {...n.checkedSpec,...(n.checkedTimeFormats?{formats:Object.fromEntries(Object.entries(n.checkedTimeFormats).map(([key,format])=>[key,resolvedTimeFormat(format)]))}:{})};}
+ function presentationSpec(n:Node):any {
+  const spec={...n.checkedSpec,...(n.checkedTimeFormats?{formats:Object.fromEntries(Object.entries(n.checkedTimeFormats).map(([key,format])=>[key,resolvedTimeFormat(format)]))}:{})};
+  const sort=n.checkedSortHeader;
+  if(sort)spec.labels={...spec.labels,[sort.column]:(spec.labels?.[sort.column]??sort.column)+(sort.direction==='asc'?' ↑':' ↓')};
+  return spec;
+ }
  function componentValue(n:Node):any {
   const attrs=Object.fromEntries(n.attrs.map((a:Node)=>[a.name,a.value]));
   return presented(expressionType(attrs.ref),value(attrs.ref),n.checkedPrecision,resolvedTimeFormat(n.checkedTimeFormat));
@@ -364,9 +369,11 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
   const a=Object.fromEntries(n.attrs.map((f:Node)=>[f.name,f.value]));const ref=(key:string)=>a[key].path[0];
   for(const key of ['data','nodes'])if(a[key]){const b=p.bindings.get(ref(key));if(b?.result?.maxRows===undefined||b.result.maxRows>MAX_PRESENTATION_ROWS||(!b.pivot&&binding(ref(key)).length>MAX_PRESENTATION_ROWS))throw Error('Presentation requires a proven and actual bound <= '+MAX_PRESENTATION_ROWS);}
   const withTotal=(figure:import('./host.ts').FigureOutput,shown:number):import('./host.ts').FigureOutput=>{
-   const total=figure.kind==='table'?remoteTotals.get(ref('data')):undefined;
-   if(total===undefined)return figure;
-   const summary=shown<total?`共 ${total} 条，展示前 ${shown} 条`:`共 ${total} 条`;
+   if(figure.kind!=='table')return figure;
+   const total=remoteTotals.get(n.checkedTotalSource);
+   const count=total===undefined?undefined:shown<total?`共 ${total} 条，展示 ${shown} 条`:`共 ${total} 条`;
+   if(!count)return figure;
+   const summary=count;
    return {...figure,content:summary+'\n\n'+figure.content,
     html:'<p>'+html(summary)+'</p>'+(figure.html??''),dataText:summary+'\n\n'+(figure.dataText??figure.content)};
   };

@@ -1,3 +1,4 @@
+import {memberDirectory,type DirectoryMember} from './member-directory.ts';
 import {encodePart,type SemanticGraph} from './knowledge-graph.ts';
 import {knowledgePoints} from './point-knowledge.ts';
 import {semanticId} from './semantic-id.ts';
@@ -111,6 +112,7 @@ export function discoverConcepts(graph:SemanticGraph,args:Record<string,unknown>
 
 export function renderConcepts(_args:unknown,value:{data:ReturnType<typeof discoverConcepts>;contracts?:Record<string,{dataset?:string;symbol?:string;type?:string;variants?:string[]}>;clocks?:Record<string,string>}){
   const classificationLines=new Map<string,Set<string>>();
+  const publicMembers=new Map<string,Map<string,DirectoryMember>>();
   const clockLines=new Map<string,string>();
   const groups=new Map<string,Map<string,Map<string,string>>>();
   for(const query of value.data.queries)for(const item of query.results){
@@ -134,17 +136,22 @@ export function renderConcepts(_args:unknown,value:{data:ReturnType<typeof disco
       if(entry.id===clockId&&clock?.symbol&&clock.type)continue;
       const contract=value.contracts?.[entry.id];
       const name=contract?.dataset&&contract?.symbol ? contract.symbol : entry.id;
-      entries.set(entry.kind+' '+name,contract?.type??entry.type);
+      if(contract?.dataset&&contract.symbol&&contract.type){
+        let members=publicMembers.get(contract.dataset);
+        if(!members)publicMembers.set(contract.dataset,members=new Map());
+        members.set(name,{kind:entry.kind as DirectoryMember['kind'],symbol:name,type:contract.type});
+      }else entries.set(entry.kind+' '+name,contract?.type??entry.type);
     }
   }
   const lines:string[]=[];
   for(const [entity,datasets] of [...groups].sort(([a],[b])=>compare(a,b))){
     lines.push('# '+entity,'');
     for(const [dataset,entries] of [...datasets].sort(([a],[b])=>compare(a,b))){
-      lines.push('## '+dataset,'');
+      const members=publicMembers.get(dataset);
       const clockLine=clockLines.get(dataset);
-      if(clockLine)lines.push(clockLine);
-      lines.push(...(classificationLines.get(dataset)??[]));
+      const notes=[...(clockLine?[clockLine]:[]),...(classificationLines.get(dataset)??[])];
+      if(members?.size)lines.push(...memberDirectory(dataset,[...members.values()],2,true,notes),'');
+      else lines.push('## '+dataset,'',...notes);
       for(const [name,type] of [...entries].sort(([a],[b])=>compare(a,b)))lines.push('- '+name+': '+type);
       lines.push('');
     }

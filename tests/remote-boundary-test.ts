@@ -55,7 +55,16 @@ const answer=(body:string)=>'answer tree! {Answer ['+body+']};';
 }
 {
  const f=fixture([sample('a')]);try{
-  assert.throws(()=>check('data raw=query_remote! {from(demo::Device).as!(a) |> project({id:a.id}).as!(r) |> filter(r.id!="x") |> order_by(asc(r.id)) |> take(1)};'+answer('Table(data=raw)'),f.model),/Remote execution requires a proven result bound/);
+  const split='data raw=query_remote! {from(demo::Device).as!(a) |> project({id:a.id}).as!(r) |> filter(r.id!="x") |> order_by(asc(r.id)) |> take(1)};'+answer('Table(data=raw)');
+  assert.throws(()=>check(split,f.model),(error:Error)=>{
+   assert.match(error.message,/Remote execution requires a proven result bound/);
+   assert.match(error.message,/此 filter 开始本地处理/);
+   assert.match(error.message,/此处之后的 take 无法限制远端取数/);
+   assert.match(error.message,/filter\(\(?r\.id/);
+   assert.match(error.message,new RegExp('L1:'+ (split.indexOf('filter(')+1) + ' '));
+   assert.doesNotMatch(error.message,/@block\//);
+   return true;
+  });
   const source=remote(3,'id:a.id')+`data rows=query! {let a=from(raw);let b=from(raw);a |> join(b,a.id==b.id) |> project({id:a.id}).as!(r) |> order_by(asc(r.id)) |> take(3)};`+answer('Table(data=rows)');assert.deepEqual(f.run(source).values.rows,[{id:'a'}]);assert.equal(f.trace.calls,1);assert.equal(f.trace.imports,1);f.clean();
  }finally{f.db.close();}
 }

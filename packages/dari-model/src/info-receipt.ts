@@ -1,3 +1,4 @@
+import {memberDirectory} from './member-directory.ts';
 import {isDeepStrictEqual} from 'node:util';
 import type {RenderBlock} from './host.ts';
 import type {readPoints} from './point-knowledge.ts';
@@ -13,12 +14,14 @@ function publicDeclaration(item:ReturnType<typeof readPoints>['items'][number], 
   if(item.kind==='Dimension'||item.kind==='Measure'){
     lines.push('# '+item.kind.toLowerCase()+' '+name+': '+c.type);
     if(item.kind==='Dimension'){
+      const capabilities=c.capabilities;
       for(const key of ['projectable','filterable','groupable']){
-        if(facts[key]===true)lines.push('# @'+key);
+        if((capabilities?(key==='filterable'?capabilities.filters.length>0:capabilities[key]):facts[key])===true)lines.push('# @'+key);
       }
-      const ops=facts.ops??facts.filters;
+      const ops=capabilities?.filters??facts.ops??facts.filters;
       if(Array.isArray(ops)&&ops.length)lines.push('# filters = '+ops.map(String).map(singleLine).join(', '));
     }
+    if(c.capabilities?.orderable)lines.push('# @orderable');
     if(item.kind==='Measure'&&facts.computed){
       const {op,left,right}=facts.computed;
       const operator=op==='Add'?'+':op==='Sub'?'-':undefined;
@@ -85,7 +88,8 @@ export function renderInfo(_args:unknown,value:{data:ReturnType<typeof readPoint
         ?['```telora',...declaration,'```']
         :declaration.map(line=>'- '+line.replace(/^# /,''));
       sections.push([`### ${heading}`,...(label?['',String(label)]:[]),...(details.length?['',...details]:[]),
-        ...(body.length?['',...body]:[])].join('\n'));
+        ...(body.length?['',...body]:[]),
+        ...(item.kind==='Dataset'&&c?.dataset&&c.members?.length?['',...memberDirectory(c.dataset,c.members,4)]:[])].join('\n'));
       continue;
     }
     const lines=[`## ${heading}`,'',`- kind: ${item.kind}`];

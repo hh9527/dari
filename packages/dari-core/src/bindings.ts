@@ -185,6 +185,8 @@ export function lowerPlanBindings(declaration:Node,fresh:()=>string,globals:Read
    // Keep remote ordering/take inside its acquisition boundary. A local
    // successor consumes bounded rows, never a fragment of remote SQL.
    const scope=r.scope,name=materialize(r,'query projection');
+   const definition=definitions.find(d=>d.name===name);
+   if(definition)definition.remoteSplit??=operation;
    r=fromTable(name,operation.at);
    for(const key of scope.keys())r.scope.set(key,r.row);
   }

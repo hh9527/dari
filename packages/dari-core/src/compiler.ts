@@ -100,7 +100,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    const findings=modelDiagnostics.map(d=>{
     const valid=(Array.isArray(d.locs)?d.locs:[]).flatMap(loc=>loc?.source==='<input>'&&loc.start&&loc.end?(()=>{const range=sourceOffsets.toChars({start:loc.start.offset,end:loc.end.offset});return range?[range]:[];})():[]);
     const fallback=modelFailure(new Error(d.message),intent,query,valid[0]);
-    const refined=fallback.details.code==='model-optional-predicate'&&fallback.details.end!==undefined;
+    const refined=['model-optional-predicate','model-parameter-type','model-filter-operation'].includes(fallback.details.code??'')&&fallback.details.end!==undefined;
     return {at:refined?fallback.at:valid[0]?.start??fallback.at,...fallback.details,end:refined?fallback.details.end:valid[0]?.end,message:fallback.message,stage:'model' as const,expression:refined||!valid[0]?fallback.details.expression:source.slice(valid[0].start,valid[0].end),related:d.locs};
    });
    if(findings.length)return new DiagnosticFailure(source,findings);
@@ -148,7 +148,13 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
      case 'parameter':return expr.type.kind==='option'?[hint(expr)+' 是可空参数']:[];
      case 'binary':return [...nullableReasons(expr.left),...nullableReasons(expr.right)];
      case 'unary':case 'subnet':return nullableReasons(expr.value);
-     case 'mapped_comparison':return nullableReasons({kind:'member',node:expr.node,member:expr.member});
+     case 'mapped_comparison':{
+      const field=hint(expr),relation=causes.get(expr.node);
+      return [
+       ...(expr.member.type.kind==='option'?[field+' 引用了可空字段 '+expr.member.symbol]:[]),
+       ...(relation?[field+' 经可选关系 '+relation.symbol+' 读取，关联未命中时为空']:[])
+      ];
+     }
      case 'call':return ['unwrap_or','is_none','is_some'].includes(expr.name)?[]:expr.args.flatMap(nullableReasons);
      default:return [];
     }
@@ -158,29 +164,70 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
     return [expr];
    }
    const filters=intent.steps.flatMap(step=>step.kind==='filter'?[step.predicate]:[]);
-   const scoped=filters.filter(located);
+   const scoped=filters.filter(expr=>located(expr)||conditions(expr).some(located));
    const candidates=(scoped.length?scoped:filters).flatMap(conditions)
     .map(expr=>({expr,reasons:nullableReasons(expr)})).filter(item=>item.reasons.length);
-   const match=candidates.find(item=>located(item.expr))??(candidates.length===1?candidates[0]:undefined);
-   if(match){
-    const node=modelLocations.get(match.expr);
-    const condition=hint(match.expr);
-    return new Fault(message,node?.sourceStart??node?.at??query.at,{end:node?.end,stage:'model',code:'model-optional-predicate',
-     expression:condition,reason:[...new Set(match.reasons)].join('，')+'。此条件可能返回 None',
-     suggestion:'若空值应排除该行，将此条件写为 unwrap_or!('+condition+', False)。若空值应保留该行，按业务口径选择 True'});
-   }
-   const target=scoped[0]??(filters.length===1?filters[0]:undefined),condition=target?hint(target):'condition';
-   return new Fault(message,target?modelLocations.get(target)?.at??query.at:query.at,{stage:'model',code:'model-optional-predicate',expression:target?condition:undefined,reason:'可空字段、可选关联或可空参数使比较结果为 Option(Bool)，筛选需要明确的 Bool',suggestion:'若空值应排除该行，使用 unwrap_or!('+condition+', False)。若空值应保留该行，按业务口径选择 True'});
+   const predicate=scoped[0]??(filters.length===1?filters[0]:undefined);
+   const match=candidates.length===1?candidates[0]:undefined;
+   const target=match?.expr??predicate;
+   const node=target&&modelLocations.get(target);
+   const condition=predicate?hint(predicate):'condition';
+   const reason=candidates.length
+    ?candidates.map(({expr,reasons})=>{
+     const part=modelLocations.get(expr);
+     const at=part?.sourceStart??part?.at??query.at;
+     const prefix=source.slice(0,at);
+     const position='L'+prefix.split('\n').length+':'+(at-prefix.lastIndexOf('\n'));
+     return position+' '+[...new Set(reasons)].join('，');
+    }).join('；')+'。筛选条件可能返回 None'
+    :'可空字段、可选关联或可空参数使比较结果为 Option(Bool)，筛选需要明确的 Bool';
+   return new Fault(message,node?.sourceStart??node?.at??query.at,{
+    end:node?.end,stage:'model',code:'model-optional-predicate',expression:target?hint(target):undefined,reason,
+    suggestion:'若空值应排除该行，将完整条件写为 unwrap_or!('+condition+', False)。若空值应保留该行，按业务口径选择 True'
+   });
   }
-  function mismatch(expr:QueryExprType):Fault|undefined{
-   if(expr.kind!=='binary')return;
-   if(expr.left.kind==='member'&&(expr.right.kind==='literal'||expr.right.kind==='parameter')){
-    const expected=storage(expr.left.member.type),actual=storage(expr.right.type);
-    if(expected.type!==actual.type&&!(expected.type==='Float'&&actual.type==='Int'))return new Fault(message+'; '+(modelLocations.get(expr.left)?expressionHint(modelLocations.get(expr.left)!):intent.nodes[expr.left.node].dataset.symbol+'.'+expr.left.member.symbol)+' expects '+show(present(expr.left.member.type))+' ('+expected.type+'), got '+show(expr.right.type)+' ('+actual.type+'). Use a parameter matching the published member type',modelLocations.get(expr.right)?.at??query.at,{stage:'model',code:'model-parameter-type',reason:'参数的物理编码与模型成员契约不一致',suggestion:'按 模型集成发布的符号与类型契约 发布的业务类型构造参数；不要修改成员类型或删去该条件'});
+  const filterFailure=/filter parameter (?:business )?type does not match|dimension does not support (?:this filter operation|filtering)|authorized mapped equality/.test(message);
+  if(filterFailure){
+   function comparisons(expr:QueryExprType):QueryExprType[]{
+    if(expr.kind==='binary'&&['&&','||'].includes(expr.op))return [...comparisons(expr.left),...comparisons(expr.right)];
+    if(expr.kind==='call'&&['unwrap_or','not'].includes(expr.name))return comparisons(expr.args[0]);
+    return [expr];
    }
-   return mismatch(expr.left)??mismatch(expr.right);
+   const comparisonsInQuery=intent.steps.flatMap(step=>step.kind==='filter'?comparisons(step.predicate):[]);
+   const targets=comparisonsInQuery.filter(expr=>{
+    if(located(expr))return true;
+    const node=modelLocations.get(expr);
+    return !!(node&&focus&&focus.start<=(node.sourceStart??node.at)&&focus.end>=(node.end??node.at));
+   });
+   const badOperation=(expr:QueryExprType)=>{
+    const member=expr.kind==='mapped_comparison'?expr.member:
+     (expr.kind==='binary'?[expr.left,expr.right]:expr.kind==='call'?expr.args:[]).find(e=>e.kind==='member')?.member;
+    const operator=expr.kind==='mapped_comparison'?expr.op:expr.kind==='call'
+     ?({contains:'Contains',not_contains:'NotContains',starts_with:'StartsWith',ends_with:'EndsWith'} as Record<string,string>)[expr.name]
+     :expr.kind==='binary'?({'==':'Eq','!=':'Ne','<':'Lt','<=':'Le','>':'Gt','>=':'Ge'} as Record<string,string>)[expr.op]:undefined;
+    return !!(operator&&member?.capabilities&&!member.capabilities.filters.includes(operator));
+   };
+   const unsupported=/dimension does not support|authorized mapped equality/.test(message)?comparisonsInQuery.filter(badOperation):[];
+   const candidates=unsupported.length===1?unsupported:targets.length?targets:comparisonsInQuery.length===1?comparisonsInQuery:[];
+   for(const expr of candidates){
+    const member=expr.kind==='mapped_comparison'?expr:expr.kind==='binary'?[expr.left,expr.right].find(e=>e.kind==='member'):expr.kind==='call'?expr.args.find(e=>e.kind==='member'):undefined;
+    if(!member||(member.kind!=='member'&&member.kind!=='mapped_comparison'))continue;
+    const parameter=expr.kind==='binary'?[expr.left,expr.right].find(e=>e.kind==='parameter'||e.kind==='literal'):undefined;
+    const memberName=intent.nodes[member.node].dataset.symbol+'::'+member.member.symbol;
+    const node=modelLocations.get(expr);
+    const location=node?.sourceStart??node?.at??query.at;
+    if(/filter parameter (?:business )?type/.test(message)&&parameter&&(parameter.kind==='literal'||parameter.kind==='parameter')){
+     const expected=show(present(member.member.type)),actual=show(parameter.type);
+     return new Fault(message,location,{end:node?.end,stage:'model',code:'model-parameter-type',expression:hint(expr),
+      reason:memberName+' 期望 '+expected+'，实际传入 '+actual,
+      suggestion:'使用 '+expected+' 类型的参数，保留原筛选口径'});
+    }
+    const ops=member.member.capabilities?.filters;
+    if(ops&&!/filter parameter/.test(message))return new Fault(message,location,{end:node?.end,stage:'model',code:'model-filter-operation',expression:hint(expr),
+     reason:ops.length?memberName+' 支持的筛选操作为 '+ops.join('、'):memberName+' 未发布筛选操作',
+     suggestion:ops.length?'根据业务口径选择该成员支持的操作，或查找支持所需操作的成员':'查找支持该筛选口径的已发布成员'});
+   }
   }
-  if(/filter parameter type/.test(message))for(const step of intent.steps)if(step.kind==='filter'){const fault=mismatch(step.predicate);if(fault)return fault;}
   if(/no declared business ordering/.test(message))for(const step of intent.steps)if(step.kind==='order_by')for(const term of step.terms){
    const value=term.value,expr=value.kind==='output'?intent.steps.flatMap(s=>s.kind==='project'&&s.value.kind==='record'?[s.value.fields[value.name]]:[])[0]:value;
    if(expr?.kind==='member'&&present(expr.member.type).codec?.variants&&!present(expr.member.type).codec?.order?.length)return new Fault(message,modelLocations.get(term.value)?.at??query.at,{stage:'model',code:'business-ordering',reason:'该分类成员没有声明业务排序，不能按其内部编码隐式排名',suggestion:'若任务只要求展示分类，在后续 query! 映射标签并按展示口径排序；业务次序须由模型声明，不能擅自当作数值或文本顺序'});
@@ -602,7 +649,10 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    if(value.k==='call'&&['difference','ratio','growth_rate','contains','not_contains','starts_with','ends_with','is_some','is_none','unwrap_or'].includes(value.name))return {kind:'call',name:value.name,args:value.args.map(expression)};
    function usesNode(v:Node):boolean{return v.k==='ref'&&aliases.has(v.path[0])||v.k==='call'&&v.args.some(usesNode)||v.k==='binary'&&(usesNode(v.left)||usesNode(v.right))||v.k==='unary'&&usesNode(v.value);}
    if(usesNode(value))err(value,'Computed model expression '+(value.name==='unwrap_or'?'unwrap_or!':value.name??value.k)+' cannot be a query parameter; project supported members in query_remote!, then compute this expression in query!');
-   const t=infer(value);if(!['scalar','nominal'].includes(present(t).kind))err(value,'Query parameters must be logical scalars');
+   const inferred=infer(value),base=present(inferred);
+   const published=base.name&&sharedTypes[base.name]&&Object.values(model!.types??{}).find(t=>t.modelLogical&&same(t,base));
+   const t=published?(inferred.kind==='option'?optional(published):published):inferred;
+   if(!['scalar','nominal'].includes(present(t).kind))err(value,'Query parameters must be logical scalars');
    return {kind:'parameter',index:parameters.push(value)-1,type:t};
   }
   const steps:QueryOperation[]=[];
@@ -716,6 +766,65 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
   }
   return spec;
  }
+ function checkTableTotal(node:Node,data:Node){
+  let name:string=data.path[0];
+  const columns:string[]=node.checkedSpec.columns??Object.keys(node.checkedFields);
+  let lineage=columns.map(column=>({column,key:column as string|undefined}));
+  const localOrders:{key:string|undefined;direction:string}[][]=[];
+  function traceColumns(resolve:(key:string)=>string|undefined){
+   for(const entry of [...lineage,...localOrders.flat()]){
+    if(entry.key!==undefined)entry.key=resolve(entry.key);
+   }
+  }
+  for(;;){
+   const binding=p.bindings.get(name)!;
+   if(binding.hasTotal){
+    binding.includeTotal=true;
+    node.checkedTotalSource=name;
+   }
+   if(binding.ast.k==='query'){
+    const terms:Node[]=binding.ast.steps.find((step:Node)=>step.name==='order_by')?.args??[];
+    const projection=binding.ast.steps.find((step:Node)=>step.name==='project')?.args[0];
+    const remoteOrder=terms.map(term=>{
+     const key=term.args[0];
+     const column=key.k==='ref'&&key.path.length===2
+      ?key.path[0]==='out'?key.path[1]:projection?.fields?.find(
+       (field:Node)=>field.value.k==='ref'&&field.value.path.join('.')===key.path.join('.')
+      )?.name
+      :undefined;
+     return {key:column,direction:term.name};
+    });
+    const first=remoteOrder[0];
+    if(first?.key!==undefined&&localOrders.every(order=>order.length===remoteOrder.length&&order.every(
+     (term,index)=>term.key!==undefined&&term.key===remoteOrder[index].key&&term.direction===remoteOrder[index].direction
+    ))){
+     const displayed=lineage.find(entry=>entry.key===first.key);
+     if(displayed)node.checkedSortHeader={column:displayed.column,direction:first.direction};
+    }
+   }
+   let plan=binding.plan;
+   while(plan){
+    if(plan.kind==='order'){
+     const input=plan.input!;
+     localOrders.push(plan.terms!.map(term=>({
+      key:term.args[0].k==='ref'?input.refs[term.args[0].path.join('.')]:undefined,
+      direction:term.name
+     })));
+    }else if(plan.kind==='project'&&!plan.aggregate&&!plan.fields?.some(field=>field.value.k==='call'&&field.value.name==='not_none')){
+     const input=plan.input!;
+     const references=new Map(plan.fields!.filter(field=>field.value.k==='ref')
+      .map(field=>[field.name,input.refs[field.value.path.join('.')]]));
+     traceColumns(key=>references.get(key));
+    }else break;
+    plan=plan.input;
+   }
+   if(plan?.kind!=='source'||plan.join||plan.sources?.length!==1)return;
+   const source=plan.sources[0];
+   const fields=new Map(Object.entries(source.fields).map(([name,key])=>[key,name]));
+   traceColumns(key=>fields.get(key));
+   name=source.binding;
+  }
+ }
  function tree(n:Node,env:Record<string,Type>={}):Type{
   const contract=componentContract(n.name,p.host);
   const checked:CheckedTreeNode={at:n.at,name:n.name,contract,attributes:n.attrs.map((a:Node)=>({at:a.at,name:a.name}))};p.treeNodes.push(checked);
@@ -755,8 +864,9 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    }
    try{p.host.checkFigure(n.name,spec,fields,nodes?.type.inner!.fields);}catch(e){finding(new Fault((e as Error).message,attrs.spec?.at??n.at));}
    if(diagnostics.hasErrors(checkpoint))throw new UpstreamTypeUnavailable();
-   if(n.name==='Table'&&data.hasTotal)data.includeTotal=true;
-   n.checkedSpec=spec;n.checkedFields=fields;n.checkedPaths=Object.keys(fields).filter(key=>!Object.hasOwn(data.type.inner!.fields!,key)).map(key=>key.split('.'));return {kind:'figure'};
+   n.checkedSpec=spec;n.checkedFields=fields;
+   if(n.name==='Table')checkTableTotal(n,attrs.data);
+   n.checkedPaths=Object.keys(fields).filter(key=>!Object.hasOwn(data.type.inner!.fields!,key)).map(key=>key.split('.'));return {kind:'figure'};
   }
   const signature=Object.fromEntries(Object.entries(builtinComponents).map(([name,c])=>[name,Object.keys(c.attributes)]));
   const optionalAttrs=Object.keys(commonAttributes);
@@ -787,9 +897,8 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    if(spec.allow_no_data!==undefined&&typeof spec.allow_no_data!=='boolean')err(n,'Table allow_no_data requires Bool');
    if(spec.title!==undefined&&typeof spec.title!=='string')err(n,'Table title requires static text');
    if(spec.precision!==undefined)try{precision(spec.precision);}catch(e){err(n,(e as Error).message);}
-   const data=lookup('data');
-   if(data.hasTotal)data.includeTotal=true;
    n.checkedSpec=spec;n.checkedFields=fields;
+   checkTableTotal(n,attrs.data);
   }
   if(n.name==='UseReport'&&lookup('ref').type.kind!=='report')err(n,'UseReport requires report');
   if(['UseValue','Lit','Table','ColumnChart','UseReport','br','hr'].includes(n.name)&&n.children.length)err(n,'Leaf component cannot have children');
@@ -892,7 +1001,21 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    if(take?.kind==='take'&&(shape.maxRows===undefined||shape.maxRows>take.count))err(d,'Model result bound exceeds the authored take('+take.count+')');
    if(shape.element.kind!=='schema'||shape.maxRows!==undefined&&(!Number.isInteger(shape.maxRows)||shape.maxRows<0))err(d,'Model query must publish a record Schema and valid result bound');
    for(const t of Object.values(shape.element.fields!)){const base=present(t);if(!['scalar','nominal'].includes(base.kind))err(d,'Model columns must be logical scalars');}
-   if(shape.maxRows===undefined||shape.maxRows>MAX_RESULT_ROWS)err(d,'Remote execution requires a proven result bound <= '+MAX_RESULT_ROWS,{code:'query-bound',reason:d.name+(shape.maxRows===undefined?' 尚未证明远端行数上界':' 已证明至多 '+shape.maxRows+' 行，超出远端上限')+'。本地下游不能限制远端取数',suggestion:'在远端阶段结束前 order_by(...) |> take(n)，n <= 500，再进行本地后处理'});
+   if(shape.maxRows===undefined||shape.maxRows>MAX_RESULT_ROWS){
+    const split:Node|undefined=d.remoteSplit;
+    const status=shape.maxRows===undefined?'尚未证明行数上界':'已证明至多 '+shape.maxRows+' 行，超出远端上限';
+    const suggestion=split?.name==='filter'
+     ?'若筛选针对聚合前的记录，将它移到远端 project 前。若筛选依赖聚合结果，请保留筛选与排名顺序，并为远端结果建立符合业务口径的上界。'
+     :split?'为远端阶段建立符合业务口径的上界，再执行本地处理。只有符合查询口径时才在远端提前截取。'
+     :'在远端阶段结束前 order_by(...) |> take(n)，n <= '+MAX_RESULT_ROWS+'，再进行本地后处理';
+    err(split??d,'Remote execution requires a proven result bound <= '+MAX_RESULT_ROWS,{
+     code:'query-bound',
+     ...(split?{end:split.end}:{}),
+     reason:split?'此 '+split.name+' 开始本地处理。前面的远端阶段'+status+'，此处之后的 take 无法限制远端取数。'
+      :(d.owner??d.name)+' '+status+'。本地下游不能限制远端取数',
+     suggestion
+    });
+   }
    if(intent.steps.some(s=>s.kind==='order_by')){let key='_dari_remote_order';while(Object.hasOwn(shape.element.fields!,key))key+='_';modelOrdering=[{key,direction:'asc'}];}
    const axes=shape.pivot;
    const fields=shape.element.fields!;

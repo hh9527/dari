@@ -15,7 +15,7 @@ export function infoContracts(model:ModelCheckPort,points:InfoPoint[]){
   const symbol=base.displayName && names.includes(base.displayName)?base.displayName:names[0];
   return {type:nullable?'Option('+(symbol??show(base))+')':symbol??show(base),...(symbol?{typeSymbol:symbol}:{}),...(base.semantic?{semantic:base.semantic}:{}),...(base.presentation?{presentation:base.presentation}:{}),...(base.codec?.operations?{calculations:base.codec.operations}:{}),...(symbol&&base.codec?.variants?{variants:base.codec.variants.map(name=>symbol+'::'+name)}:{})};
  };
- const memberContract=(m:any)=>({symbol:m.symbol,kind:m.kind,...typeContract(m.type)});
+ const memberContract=(m:any)=>({symbol:m.symbol,kind:m.kind,capabilities:m.capabilities,...typeContract(m.type)});
  return Object.fromEntries(points.map(point=>{
   if(point.kind==='Symbol'&&point.symbol){
    const encode=(name:string)=>encodeURIComponent(name).replace(/[!'()*]/g,char=>'%'+char.charCodeAt(0).toString(16).toUpperCase());
@@ -45,7 +45,7 @@ export function infoContracts(model:ModelCheckPort,points:InfoPoint[]){
    const id=point.dimension??point.measure;
    if(id!==undefined){const member=Object.values(dataset.members).find(m=>m.id===id&&m.kind===(point.dimension?'dimension':'measure'));if(member)value={dataset:dataset.symbol,...memberContract(member)};}
    else if(point.kind==='Field'&&point.members)value={dataset:dataset.symbol,members:Object.values(dataset.members).filter(m=>point.members!.some(p=>p.kind===m.kind&&p.id===m.id)).map(memberContract)};
-   else if(point.kind==='Dataset')value={dataset:dataset.symbol,relations:relations.filter(r=>r.from===dataset.id||r.to===dataset.id)};
+   else if(point.kind==='Dataset')value={dataset:dataset.symbol,members:Object.values(dataset.members).map(memberContract),relations:relations.filter(r=>r.from===dataset.id||r.to===dataset.id)};
   }else if(point.datasets)value={datasets:point.datasets.flatMap(id=>datasets.filter(d=>d.id===id).map(d=>({id:d.id,symbol:d.symbol})))};
   else if(point.type){const type=Object.values(model.types??{}).find(t=>typeId(t.name)===point.type);if(type){const c=typeContract(type);if(point.variant){if(type.codec?.variants?.includes(point.variant)&&c.typeSymbol)value={symbol:c.typeSymbol+'::'+point.variant,type:c.type};}else value=c;}}
   return [point.id,value??{available:false}];

@@ -31,6 +31,11 @@ assert(!parameter.suggestion!.includes('a.name'));
 assert.equal(parameter.at,optional.indexOf('a.tenant_id'));
 const bool=rejected(optional,'Predicate requires Bool; got Option(Bool)','a.tenant_id == picked');
 assert.equal(bool.code,'model-optional-predicate');assert.match(bool.reason!,/可空参数/);
+const compound=optional.replace('data picked:Option(demo::TenantId)=None;', 'data request:Schema({picked:Option(demo::TenantId)})=input();').replace('filter(a.name == "A") |> ', '').replace('filter(a.tenant_id == picked)', 'filter(a.tenant_id == request.picked || a.tenant_id != request.picked)');
+const compoundDiagnostic=rejected(compound,'Predicate requires Bool; got Option(Bool)','a.tenant_id == request.picked');
+assert.equal(compoundDiagnostic.expression,'a.tenant_id == request.picked || a.tenant_id != request.picked');
+assert.equal(compoundDiagnostic.reason!.match(/是可空参数/g)?.length,2);
+assert.match(compoundDiagnostic.suggestion!,/unwrap_or!\(a.tenant_id == request\.picked \|\| a.tenant_id != request\.picked, False\)/);
 // Context diagnoses discriminate Table from an already optional row.
 const table=analyze('data rows=table([{n:1}]);data picked=take_opt(rows);answer tree! {Answer []};').diagnostics[0];
 assert.equal(table.code,'plan-operator-context');assert.match(table.suggestion!,/from\(rows\)/);
