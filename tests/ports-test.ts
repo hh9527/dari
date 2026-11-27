@@ -9,7 +9,7 @@ const db=new DatabaseSync(':memory:');
 const {model,stats}=createFixtureModel(sqlite(db));
 const {execute,...checker}=model;
 const executor={contractId:model.contractId,implementationId:model.implementationId,execute};
-const source='data rows=query_remote! {let d=from(demo::DeviceKpi);let result=d |> project({name:d.name,cpu:d.cpu_usage});result |> order_by(desc(result.cpu)) |> take(2)};answer tree! {Answer [Table(data=rows)]};';
+const source='data rows=query_remote! {let d=from(demo::DeviceKpi);let result=d |> project({name:d.name,cpu:d.cpu_usage});result |> order_by(desc(result.cpu)) |> top(2)};answer tree! {Answer [Table(data=rows)]};';
 const p=check(source,checker);assert.equal(stats.checks,1);assert.equal(stats.executions,0);assert(!('execute'in checker));
 try{
  db.exec("CREATE TABLE devices(id TEXT,name TEXT,cpu REAL,tenant TEXT);INSERT INTO devices VALUES('a','A',10,'x'),('b','B',50,'x')");
@@ -21,7 +21,7 @@ try{
  const counted={...checker,check_type(...args:Parameters<typeof checker.check_type>){
   return {...checker.check_type(...args),hasTotal:true};
  }};
- const page=check(source.replace('take(2)','take(1)'),counted);
+ const page=check(source.replace('top(2)','take(1)'),counted);
  const withTotal={...executor,execute(plan:unknown,parameters:unknown[],includeTotal?:boolean){
   assert.equal(includeTotal,true);
   return {...execute(plan,parameters),total:2};
@@ -29,7 +29,16 @@ try{
  const delivered=resolve(page,sqlite(db),{},{model:withTotal});
  assert.match(delivered.answer,/共 2 条，展示 1 条/);
  assert.match(delivered.dataDocument,/共 2 条，展示 1 条/);
- const cleaned=source.split('answer tree!')[0].replace('take(2)','take(1)')+
+ const localCounts=(operator:string, predicate:string)=>resolve(check(
+  `data src=table([{n:1},{n:2},{n:3}]);
+   data page=query! {from(src).as!(r) |> filter(r.n>${predicate}) |> project({n:r.n}).as!(out) |> order_by(asc(out.n)) |> ${operator}(2)};
+   answer tree! {Answer [Table(data=page,spec={allow_no_data:True}),UseValue(ref=page.fetched_count),UseValue(ref=page.total_count)]};`
+ ),sqlite(db));
+ assert.match(localCounts('take','0').answer,/共 3 条，展示 2 条/);
+ assert.match(localCounts('top','0').answer,/共 2 条/);
+ assert.match(localCounts('take','3').answer,/共 0 条/);
+ assert.throws(()=>check(source.replace('top(2)','take(2)'),checker),/exact total/);
+ const cleaned=source.split('answer tree!')[0].replace('top(2)','take(1)')+
   'data clean=query! {let r=from(rows);let out=r |> project({name:r.name});out |> order_by(asc(out.name))};'+
   'report summary=tree! {Report(title="Summary") [Table(data=clean)]};answer tree! {Answer [UseReport(ref=summary)]};';
  const report=resolve(check(cleaned,counted),sqlite(db),{},{model:withTotal});

@@ -1,4 +1,4 @@
-import {CHART_ROW_ID} from './chart/shared.ts';
+import {CHART_ROW_ID,toLabel} from './chart/shared.ts';
 import type {ComponentContract} from '@local/dari-core';
 import {temporal,timeSemantic,formatTime,embeddedTimeZone,validateTimeFormat,type TimeFormat} from './time-display.ts';
 import {formatValue,precision,type Type} from './display-values.ts';
@@ -57,6 +57,7 @@ function presentationSpec(raw:Record<string,unknown>,name:string,fields:Record<s
  if(!formats||typeof formats!=='object'||Array.isArray(formats))throw Error('formats requires field names mapped to time formats');
  for(const [key,format]of Object.entries(formats)){if(!fields[key])throw Error('Unknown format field '+key);validateTimeFormat(fields[key],format);}
  delete raw.formats;
+ delete raw.value_labels;
  let axisType:unknown;
  if(name==='LineChart'||name==='AreaChart'){
   const type=fields[String(raw.x)],role=timeSemantic(type),numeric=['Int','Float'].includes(storage(type??scalar('String')));
@@ -189,12 +190,24 @@ const componentContracts:Record<string,ComponentContract>=Object.fromEntries(Obj
 const host={
  contractId:'dari-host/v8',types:{Orientation:closedEnum('Orientation',orientations),StackMode:closedEnum('StackMode',stackModes),Stack:stackType,Axis:closedEnum('Axis',['Time','Category','Value']),TimeUnit:closedEnum('TimeUnit',timeUnits),WindowMode:closedEnum('WindowMode',windowModes)},formatValue,componentContracts,components:Object.keys(COMPONENT_KINDS),reportStyle:REPORT_STYLE,
  reportHtml(text:string,artifacts:Record<string,string>){return renderMarkdown(text,()=>{throw Error('Unexpected report fence');},(alt,href)=>{const svg=artifacts[href];if(!svg)throw Error('Missing report figure '+href);return '<figure>'+cleanChartSvg(svg)+'</figure>';});},
- checkFigure(name:string,spec:Record<string,unknown>,fields:Record<string,Type>,nodes?:Record<string,Type>){const normalized=presentationSpec(spec,name,fields);stacking(normalized,fields);const wide=wideSeries(name,normalized,fields);validate(name,wide.spec,wide.fields);if(name==='NetworkGraph'&&(!nodes?.id||!nodes.depth&&!(nodes.x&&nodes.y)))throw Error('NetworkGraph requires a nodes table with id and depth or x/y');if(name!=='NetworkGraph'&&nodes)throw Error('Only NetworkGraph accepts nodes');},
+ checkFigure(name:string,spec:Record<string,unknown>,fields:Record<string,Type>,nodes?:Record<string,Type>){const normalized=presentationSpec(spec,name,fields);stacking(normalized,fields);const wide=wideSeries(name,normalized,fields);const checked=validate(name,wide.spec,wide.fields);
+  if(spec.value_labels&&checked.kind!=='table'){
+   const parsed=parseChartSpec(checked);if('error'in parsed)throw Error(parsed.error);
+   const chart=parsed.spec;
+   const supported=['bar','column','grouped_bar','grouped_column','line','area','pie','heatmap'];
+   const categorical=chart.x_type===null||chart.x_type==='String';
+   for(const key of Object.keys(spec.value_labels)){
+    if(!supported.includes(chart.kind)||!(key===chart.series||key===chart.x&&categorical))
+     throw Error('value_labels requires a supported category or series field: '+key);
+   }
+  }if(name==='NetworkGraph'&&(!nodes?.id||!nodes.depth&&!(nodes.x&&nodes.y)))throw Error('NetworkGraph requires a nodes table with id and depth or x/y');if(name!=='NetworkGraph'&&nodes)throw Error('Only NetworkGraph accepts nodes');},
  renderFigure(name:string,raw:Record<string,unknown>,rows:Record<string,unknown>[],fields:Record<string,Type>,nodes?:Record<string,unknown>[]){
   const normalized=presentationSpec(raw,name,fields);stacking(normalized,fields);const wide=wideSeries(name,normalized,fields,rows);
   const spec=validate(name,wide.spec,wide.fields);
+  const labels=Object.fromEntries(Object.entries((raw.value_labels??{}) as Record<string,{entries:[unknown,string][];fallback?:string}>).map(([key,mapping])=>[key,{...mapping,entries:new Map(mapping.entries)}]));
+  const label=(key:string,value:unknown)=>Object.hasOwn(labels,key)?labels[key].entries.get(value)??labels[key].fallback:undefined;
   if(spec.kind==='table'){
-   const shown=rows.map(row=>Object.fromEntries(Object.entries(row).map(([key,value])=>[key,fields[key]?formatValue(fields[key],value,precision(raw.precision),(raw.formats as any)?.[key]):value])));
+   const shown=rows.map(row=>Object.fromEntries(Object.entries(row).map(([key,value])=>[key,label(key,value)??(fields[key]?formatValue(fields[key],value,precision(raw.precision),(raw.formats as any)?.[key]):value)])));
    const t=parseTableSpec(spec),content=tableMarkdown(shown,{allowNoData:t.allowNoData,columns:t.columns??Object.keys(fields),labels:t.labels,...(t.title?{title:t.title}:{})});
    if('error'in content)throw Error(content.error);
    return {kind:'table' as const,content:content.embedded,html:renderMarkdown(content.embedded,()=>{throw Error('Unexpected table fence');}),title:t.title??'Table'};
@@ -211,14 +224,23 @@ const host={
    });
   }
   const problem=shapeProblem(renderRows,parsed.spec);if(problem)throw Error(problem);
-  const {option,height}=buildOption(renderRows,parsed.spec,nodes);
+  const chartLabels=(key:string|null)=>{
+   if(key===null||!Object.hasOwn(labels,key))return undefined;
+   return new Map(wide.rows.flatMap((row,i)=>{
+    const text=label(key,row[key]);
+    return text===undefined?[]:[[toLabel(renderRows[i][key]),text] as const];
+   }));
+  };
+  const {option,height}=buildOption(renderRows,parsed.spec,nodes,{
+   category:chartLabels(parsed.spec.x), series:chartLabels(parsed.spec.series)
+  });
   formatChart(option,wide.fields,parsed.spec,precision(raw.precision));
   formatTimeChart(option,wide.fields,parsed.spec,wide.rows,(raw.formats??{}) as Record<string,TimeFormat>);
   if((option as any).visualMap){const values=renderRows.map(row=>row[parsed.spec.value]).filter((v):v is number=>typeof v==='number');if(values.length)(option as any).visualMap.text=[Math.max(...values),Math.min(...values)].map(v=>String(formatValue({kind:'scalar',name:'Float',presentation:{multiplier:1,suffix:policy?.suffix??parsed.spec.unit??'',precision:policy?.precision}},v,precision(raw.precision))));}
   const used=new Set<string>();
   const collect=(v:unknown):void=>{if(typeof v==='string'&&Object.hasOwn(fields,v))used.add(v);else if(Array.isArray(v))v.forEach(collect);else if(v&&typeof v==='object')Object.values(v).forEach(collect);};
   for(const key of ['x','y','category','series','value','size','source','target','metrics','second','open','close','low','high'])collect(raw[key]);
-  const shown=rows.map(row=>Object.fromEntries([...used].map(key=>{const policy=presentation(fields[key]);const v=row[key];return [key+(policy?.suffix?' ('+policy.suffix+')':''),temporal(fields[key])?formatValue(fields[key],v,undefined,(raw.formats as any)?.[key]):policy&&typeof v==='number'?Number((v*policy.multiplier).toPrecision(12)):v];})));
+  const shown=rows.map(row=>Object.fromEntries([...used].map(key=>{const policy=presentation(fields[key]);const v=row[key];return [key+(policy?.suffix?' ('+policy.suffix+')':''),label(key,v)??(temporal(fields[key])?formatValue(fields[key],v,undefined,(raw.formats as any)?.[key]):policy&&typeof v==='number'?Number((v*policy.multiplier).toPrecision(12)):v)];})));
   const fence='\x60'.repeat(3);
   const dataText=fence+'csv\n'+csv(shown,[...used].map(key=>key+(presentation(fields[key])?.suffix?' ('+presentation(fields[key])!.suffix+')':'')))+'\n'+fence+(nodes?'\n\n### nodes\n\n'+fence+'csv\n'+csv(nodes)+'\n'+fence:'');
   return {kind:'chart' as const,dataText,content:embedFigureCsv(renderEchartsSvg(option,CHART_WIDTH,height),{rows,spec:{component:name,...raw,precision:precision(raw.precision),default_precision:2,presentation:Object.fromEntries(Object.entries(fields).flatMap(([key,type])=>{const policy=presentation(type);return policy?[[key,policy]]:[];}))},...(nodes?{nodeRows:nodes}:{})}),title:parsed.spec.title??name};

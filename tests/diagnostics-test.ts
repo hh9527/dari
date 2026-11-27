@@ -47,7 +47,7 @@ const invalidData='answer tree! {Answer [Table(data = 42)]};';assert.equal(failu
 
 // A failed check retains independent warnings, including those preceding a bad plan.
 const combinedSource=`data input=table([{n:1}]);
-data warned=query! {let r=from(input).as!(r);r |> order_by(asc(r.n)) |> take(2)};
+data warned=query! {let r=from(input).as!(r);r |> order_by(asc(r.n)) |> top(2)};
 data bad=query! {let g=group_by_identity(a);g};
 data other=unknown_value;
 answer tree! {Answer [p ["固定 3 项"]]};`;

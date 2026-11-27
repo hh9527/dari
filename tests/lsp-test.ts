@@ -14,7 +14,7 @@ open('data a=missing;data b=other;answer tree! {Answer []};');assert.equal(notif
 const text='data a=42;data b=a+1;answer tree! {Answer [UseValue(ref=b)]};';
 assert.match(ask('hover',text,text.indexOf('a+1')).contents.value,/Int/);
 assert.equal(ask('definition',text,text.indexOf('a+1')).range.start.character,5);
-const local='data samples=table([{name:"a",value:1}]);data rows=query! {let a=from(samples);let result=a |> project({name:a.name,value:a.value});result |> order_by(asc(result.name)) |> take(1)};answer tree! {Answer [Table(data=rows)]};';
+const local='data samples=table([{name:"a",value:1}]);data rows=query! {let a=from(samples);let result=a |> project({name:a.name,value:a.value});result |> order_by(asc(result.name)) |> top(1)};answer tree! {Answer [Table(data=rows)]};';
 assert.equal(ask('definition',local,local.indexOf('a.name')).range.start.character,local.indexOf('a=from'));
 const complete=local.replace('a.name','a.');
 const items=ask('completion',complete,complete.indexOf('a.')+2).items;
@@ -23,7 +23,7 @@ const selector='data rows=table([{name:"A",value:1}]);answer tree! {Answer [Tabl
 assert(ask('completion',selector,selector.indexOf('$.')+2).items.some((i:any)=>i.label==='value'));
 const emoji='data title="中文😀";data a=missing;answer tree! {Answer []};';open(emoji);assert.equal(notifications.at(-1).params.diagnostics[0].range.start.character,emoji.indexOf('missing'));
 server.handle('textDocument/didChange',{textDocument:{uri,version:2},contentChanges:[{range:{start:{line:0,character:emoji.indexOf('missing')},end:{line:0,character:emoji.indexOf('missing')+7}},text:'1'}]});assert.equal(notifications.at(-1).params.diagnostics.length,0);
-const remote='data rows=query_remote! {let d=from(demo::DeviceKpi);let result=d |> project({name:d.name});result |> order_by(asc(result.name)) |> take(1)};answer tree! {Answer []};';open(remote);assert(notifications.at(-1).params.diagnostics.some((d:any)=>d.code==='model-unavailable'&&d.severity===2));
+const remote='data rows=query_remote! {let d=from(demo::DeviceKpi);let result=d |> project({name:d.name});result |> order_by(asc(result.name)) |> top(1)};answer tree! {Answer []};';open(remote);assert(notifications.at(-1).params.diagnostics.some((d:any)=>d.code==='model-unavailable'&&d.severity===2));
 const {model}=createFixtureModel();const location={uri:'file:///model/catalog.txt',range:{start:{line:0,character:0},end:{line:0,character:4}}};const remoteServer=new LanguageServer({checker:model,symbols:{'demo::DeviceKpi.name':location}});remoteServer.handle('textDocument/didOpen',{textDocument:{uri,text:remote,version:1}});assert.equal(model.implementationId,'dari-fixture-implementation-v2');
 assert.deepEqual(remoteServer.handle('textDocument/definition',{textDocument:{uri},position:positionAt(remote,remote.indexOf('d.name')+2)}),location);
 const remoteIncomplete=remote.replace('d.name','d.');remoteServer.handle('textDocument/didChange',{textDocument:{uri,version:2},contentChanges:[{text:remoteIncomplete}]});
@@ -42,7 +42,7 @@ for(const [name,offset,pattern] of [
 ] as const){const hover=ask('hover',local,offset);assert(hover,`${name} hover missing at ${offset}`);assert.match(hover.contents.value,pattern);}
 const block='data x=do {let n=1;let m=n+1;m};answer tree! {Answer [UseValue(ref=x)]};';
 assert.match(ask('hover',block,block.indexOf('n=1')).contents.value,/data n: Int/);
-const shadow='data input=table([{id:1}]);data rows=query! {let r=from(input);let r=r |> project({label:"A"});r |> order_by(asc(r.label)) |> take(1)};answer tree! {Answer []};';
+const shadow='data input=table([{id:1}]);data rows=query! {let r=from(input);let r=r |> project({label:"A"});r |> order_by(asc(r.label)) |> top(1)};answer tree! {Answer []};';
 assert.match(ask('hover',shadow,shadow.indexOf('r=from')).contents.value,/id: Int/);
 assert.match(ask('hover',shadow,shadow.indexOf('r=r')).contents.value,/label: String/);
 const alias=local.replace('let a=from(samples);','let unused=from(samples).as!(a);');

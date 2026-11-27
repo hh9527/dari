@@ -27,7 +27,7 @@ data top = query! {
     let rows = from(samples);
     let rows = rows |> filter(rows.value > 50.0);
     let rows = rows |> project({name:rows.name,value:rows.value});
-    rows |> order_by(desc(rows.value)) |> take(10)
+    rows |> order_by(desc(rows.value)) |> top(10)
 };
 ```
 
@@ -37,20 +37,20 @@ data top = query! {
 
 query_remote! 投影维度和度量时，模型对完整输入按所投影维度聚合。take 限制的是聚合后的输出行数，不截断参与聚合的原始数据。只有逐对象指标才使用 group_by_identity(a)。
 
-有精确总数需求时，可写 `data total = total_rows(page);`，其中 `page` 是同一稿件中以 `order_by(...) |> take(N)` 结束、且模型支持精确总数的远端清单。总数按清单的筛选、分组和投影口径在最终截取前计算。空清单的总数为 0。结果可在同一次交付中通过 `UseValue(ref = total)` 引用。 表格直接使用支持精确总数的远端清单时，默认显示总数。清单截取时同时显示实际展示条数。
+有序结果用 `top(N)` 回答排名问题，返回完整的入榜结果。清单需要同时说明完整规模时，使用末尾的 `take(N)`，总数按同一口径在截取前计算。远端模型须证明能提供精确总数。表格自动显示总数和实际展示条数。正文需要引用计数时可用 `page.total_count` 或 `page.fetched_count`，两者均为 `Int`。空结果的两个计数均为 0。逐行投影和重排保留清单总数。
 
 
 ```telora
 data rows = query_remote! {
     let a = from(demo::Items);
     let output = project({category:a.category,total:a.count});
-    output |> order_by(asc(output.category)) |> take(10)
+    output |> order_by(asc(output.category)) |> top(10)
 };
 
 answer tree! { Answer [h1 ["分类构成"],PieChart(data = rows,spec = {x:$.category,value:$.total,title:"分类构成"})]};
 ```
 
-远端 project 接受已发布成员及模型支持的分桶、时间转换、not_none。常量标签、lookup、case_when 和派生列放在后续 query!；影响分组口径的计算须在聚合前完成，例如远端分桶或分别筛选完整时间窗口。
+远端 project 接受已发布成员及模型支持的分桶、时间转换、not_none。展示标签使用图表或表格的 `spec.value_labels`。参与计算的 lookup、case_when 和派生列可放在后续 query!；影响分组口径的计算须在聚合前完成，例如远端分桶或分别筛选完整时间窗口。
 
 `group_by_identity` 的输入计划放在 `|>` 左侧，参数是该计划中由 from/connect 绑定的身份节点；身份依据模型发布的绑定，名称字段不代替身份。分组结果必须继续用于投影：
 
@@ -60,7 +60,7 @@ data ranked = query_remote! {
     let filtered = rows |> filter(a.category == demo::Category::A);
     let grouped = filtered |> group_by_identity(a);
     let output = grouped |> project({label:a.name,value:a.metric});
-    output |> order_by(desc(output.value)) |> take(5)
+    output |> order_by(desc(output.value)) |> top(5)
 };
 ```
 
@@ -75,7 +75,7 @@ data rows = query_remote! {
     let linked = from(demo::Items).as!(a)
         |> connect(demo::relations::item_of_group).as!(b);
     let output = linked |> project({item:a.name,group:b.name});
-    output |> order_by(asc(output.item)) |> take(10)
+    output |> order_by(asc(output.item)) |> top(10)
 };
 ```
 
@@ -107,23 +107,40 @@ data overlap = query! {
 
 semi_join/anti_join 用 EXISTS/NOT EXISTS 保留或排除左侧行，右侧重复不放大结果；上例继承 left_rows 的十行上界，无需重复 take。join/left_join 写为 a |> join(b, a.id == b.id)，可继续串接；最终 project 命名输出字段。union/union_all/intersect/except 写为 a |> intersect(b) 等，要求一致的字段名、业务类型及可空性。top_per({group:r.group},desc(r.value),n) 在各组内按指定顺序取前 N。
 
-本地、远端均支持一次调用中的多键排序：`output |> order_by(desc(output.rank), asc(output.name)) |> take(10)`，按参数顺序决定优先级，不需要拼接复合数字键。显示值相同不证明底层值完全相同；确定性破除并列可追加稳定身份键。
+本地、远端均支持一次调用中的多键排序：`output |> order_by(desc(output.rank), asc(output.name)) |> top(10)`，按参数顺序决定优先级，不需要拼接复合数字键。显示值相同不证明底层值完全相同；确定性破除并列可追加稳定身份键。
 
 远端投影前，字段引用属于具体 from/connect 节点，group_by_identity 不合并节点成员；投影后，通过结果绑定引用新的列。project 改变行 Schema，distinct 保留该 Schema；写 `let output = rows |> project({...}) |> distinct(); output |> order_by(asc(output.field))`，不要继续用投影前名称引用新列。
 
 有限算术、lookup、unwrap_or!、round(value,precision)、concat、case_when、is_some/is_none、difference/ratio/growth_rate 放在前序 data 或 query! 中。整数余数用 `%`，除零或余数除零返回空值。map_opt(optional_row,$.field) 投影可选行字段。in_subnet/not_in_subnet(address,"192.168.1.0/24") 在 query! 中筛选已投影 IPv4 字段，非规范地址为空，子网必须规范且主机位为零。query_remote! 也可对声明了 InSubnet 或 NotInSubnet 的 IPv4 维度使用对应函数，CIDR 使用字符串字面量。有限补充数据用 `table([{name:"目标",value:1}])`；空表必须声明 Table(Schema(...))。
 
-等值标签映射用 lookup(value, [{value, label}, ...])：非空静态数组、键唯一且与输入业务类型一致、label 类型一致；未命中或输入为空返回 None，可按口径使用 value.unwrap_or!(default_expr)。前置 unwrap_or!(value,default_expr) 与后置形式等价，默认表达式只在 None 时求值，类型为 Option(T) × T → T。稳定业务编码用模型映射，任务显示标签用 lookup。例如 query! 的 project 字段：
+远端按封闭枚举分类统计，并按数量降序展示完整分组。枚举能证明结果符合展示上界时，可省略 `take`。需要取前 N 且数量可能并列时，追加模型发布的稳定排序键。饼图直接使用查询结果。分类标签在图表的 `spec.value_labels` 中映射。
 
-```telora
-category: unwrap_or!(lookup(r.cls, [
+```dari
+data class_rows = query_remote! {
+    let a = from(demo::Items);
+    let output = project({cls:a.category,total:a.count});
+    output |> order_by(desc(output.total))
+};
+
+data class_labels = [
     {value: demo::Category::A, label: "甲类"},
-    {value: demo::Category::B, label: "乙类"},
-    {value: demo::Category::C, label: "丙类"}
-]), "未标注分类")
+    {value: demo::Category::B, label: "乙类"}
+];
+
+answer tree! {
+    Answer [
+        PieChart(data = class_rows, spec = {
+            x: $.cls,
+            value: $.total,
+            value_labels: {cls: $.cls.lookup!(class_labels).unwrap_or!("未标注分类")}
+        })
+    ]
+};
 ```
 
-枚举键使用已发布的精确符号；标签用于展示，筛选和计算保留原业务字段。
+同一配置也适用于表格单元格、分类轴和系列图例，原值保留其身份与排序。键使用输入字段的业务类型并保持唯一，展示标签为静态文本。未命中时可用 `unwrap_or!` 给出文本兜底，也可沿用原值的显示。
+
+映射结果参与本地计算时，使用 `value.lookup!(labels)`。它返回 `Option(T)`，其中 `T` 是映射表的统一值类型。映射表须为非空静态数组，输入为空或未命中时返回 `None`。
 
 case_when(condition, then_value, else_value) 接受三个参数，条件为 Bool，两支类型兼容；多条件嵌套在 else_value 中。
 
@@ -174,7 +191,7 @@ query! 中先投影桶字段，再对该字段 group_by 并 project 聚合值。
 data rows = query_remote! {
     let a = from(demo::Samples);
     let grouped = a |> project({day: utc_bucket(a.ts, CalendarUnit::Day), value: a.metric});
-    grouped |> order_by(asc(grouped.day)) |> take(100)
+    grouped |> order_by(asc(grouped.day)) |> top(100)
 };
 ```
 
@@ -187,7 +204,7 @@ data ctx = context! { tz: Context::ClientTz };
 data daily = query_remote! {
     let a = from(demo::Samples);
     let grouped = a |> project({day: calendar_bucket(a.ts, CalendarUnit::Day, ctx.tz), value: a.metric});
-    grouped |> order_by(asc(grouped.day)) |> take(100)
+    grouped |> order_by(asc(grouped.day)) |> top(100)
 };
 ```
 

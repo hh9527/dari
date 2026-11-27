@@ -12,7 +12,7 @@ data labeled=query! {
   device:unwrap_or!(rows.device,"未登记设备"),
   port:rows.port.unwrap_or!("未命名端口")
  });
- output |> order_by(asc(output.port)) |> take(10)
+ output |> order_by(asc(output.port)) |> top(10)
 };answer tree! {Answer [Table(data=labeled)]};`;
 try{check(source,undefined,{allowTestSources:true});assert.fail('Expected failure');}catch(e){
  assert(e instanceof DiagnosticFailure);

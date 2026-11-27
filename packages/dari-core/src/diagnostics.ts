@@ -25,7 +25,7 @@ export function repairSuggestion(message:string):string|undefined {
  if(/Unknown (?:binding|declaration|type)/.test(message))return '核对名称与大小写，并将定义放在使用它的声明之前';
  if(/Unknown (?:figure )?attribute/.test(message))return '核对组件支持的属性；图表配置写在 spec = {...} 中';
  if(/requires.*order_by|requires an ordering|on multiple rows requires/.test(message))return '先依据业务口径选择排序字段，用当前计划的具名绑定声明 order_by，再 take(n)；不要依赖数据库默认行序';
- if(/proven bound|terminal take/.test(message))return '在交付前通过 order_by(...) |> take(n) 证明上界，n 为 1..500；中间计划可继续在 query! 中处理，不要提前截断参与计算的数据';
+ if(/proven bound|terminal take/.test(message))return '在交付前通过 order_by(...) |> top(n) 证明上界，n 为 1..500；中间计划可继续在 query! 中处理，不要提前截断参与计算的数据';
  if(/stack requires Stack::/.test(message))return 'stack 使用 Stack::None、Stack::Total 或 Stack::Percent，按需要选择并列、原值堆叠或构成比堆叠';
  if(/Stacking requires an additive|does not allow Sum/.test(message))return '堆叠使用允许 Sum 的同类指标；同一指标只需并列时选择 GroupedBarChart，不同指标并列时选择 MultiBarChart，保留业务类型';
  if(/precision requires/.test(message))return 'precision 使用 0..12 的静态整数；它只改变展示，不改变原始数据精度';

@@ -32,6 +32,8 @@
 
 四种柱条图的 value_min 可设置轴基线，例如 99.0；条/柱上的标注仍是原始数值。空输入默认报错；显式 allow_no_data:True 接受空表并显示“无数据”。Table 同样支持 allow_no_data，保留表头。表格 labels 例如 {label:"类别",value:"数值"}，columns 决定列顺序，例如 [$.label,$.value]，也接受字符串列名。SVG 内嵌最终图表输入的 CSV 和 spec，报告保留这些信息。
 
+表格单元格、分类轴、饼图扇区和系列图例可以使用 `spec.value_labels`。例如 `value_labels: {cls: $.cls.lookup!(class_labels).unwrap_or!("其他")}`。分类和系列按原始值对齐，同名标签可以同时显示。
+
 ## 柱条图：数据形态与可加和性
 
 | 目标 | 数据形态 | 映射配置 | 堆叠 |

@@ -61,7 +61,7 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
   acquisitions.push({binding:name,kind:'local',sql:text,parameters:args,startedAt,elapsedMillis:performance.now()-start,rowCount:rows.length});
   return rows;
  }
- const remoteTotals=new Map<string,number>();
+ const tableTotals=new Map<string,number>();
  const remoteRows=new Map<string,SqlRow[]>(),materialized=new Map<string,string>();
  function remote(name:string):SqlRow[]{
   const cached=remoteRows.get(name);if(cached)return cached;
@@ -94,8 +94,8 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
   if(result.pivot!==undefined)throw Error('Unexpected pivot payload: '+name);
   if(b.includeTotal){
    const total=result.total;
-   if(total===undefined||!Number.isSafeInteger(total)||total<result.rows.length)throw Error('Model transform contradicts published total row count: '+name);
-   remoteTotals.set(name,total);
+   if(total===undefined||!Number.isSafeInteger(total)||total<0||result.rows.length!==Math.min(b.ast.steps.at(-1).args[0].value,total))throw Error('Model transform contradicts published total row count: '+name);
+   tableTotals.set(name,total);
   }
   const fields=b.result!.element.fields!;
   for(const row of result.rows)if(!row||typeof row!=='object'||Array.isArray(row)||Object.keys(row).length!==expected.length||Object.keys(row).some(key=>!Object.hasOwn(fields,key)))throw Error('Model result Schema does not match the published fields: '+name);
@@ -140,10 +140,9 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
  }
  function validate(t:Type,v:any):boolean {if(t.kind==='option')return v===null||validate(t.inner!,v);if(t.kind==='nominal')return validate(t.inner!,v);if(t.kind==='schema')return v!==null&&typeof v==='object'&&Object.entries(t.fields!).every(([k,t])=>Object.hasOwn(v,k)&&validate(t,v[k]));if(t.name==='Int'||t.name==='EpochMillis')return Number.isSafeInteger(v);if(t.name==='Float')return typeof v==='number'&&Number.isFinite(v);if(t.name==='Bool')return typeof v==='boolean';if(t.name==='Rfc3339')return typeof v==='string'&&/^\d{4}-\d\d-\d\dT.*(?:Z|[+-]\d\d:\d\d)$/.test(v)&&Number.isFinite(Date.parse(v));return typeof v==='string';}
  function value(n:Node):any {
-  if(n.k==='call'&&n.name==='total_rows'){
-   const name=n.args[0].path[0];
-   binding(name);
-   return remoteTotals.get(name)!;
+  if(n.k==='ref'&&n.path.length===2&&['fetched_count','total_count'].includes(n.path[1])&&
+     !scopes.some(scope=>Object.hasOwn(scope,n.path[0]))&&p.bindings.get(n.path[0])?.type.kind==='table'){
+   return tableCounts(n.path[0])[n.path[1] as 'fetched_count'|'total_count'];
   }
   if(n.calendarBucketUnit)return calendarBucket(value(n.args[0]),n.calendarBucketUnit,value(n.args[2]));
   if(n.utcBucketUnit)return utcBucket(value(n.args[0]),n.utcBucketUnit);
@@ -237,7 +236,7 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
     if(p.types.get(n.name)?.kind==='scalar'&&timeType(p.types.get(n.name)!)){if(n.args[0].k==='literal'){args.push(value(n));return '?';}return 'dari_parse_'+p.types.get(n.name)!.name+'('+expr(n.args[0],input,qualifier)+')';}
     if(p.host?.functions[n.name]?.sql)return 'dari_host_'+n.name+'('+n.args.map((a:Node)=>expr(a,input,qualifier)).join(', ')+')';
     if(n.name==='not_none')return expr(n.args[0],input,qualifier);
-    if(n.name==='total_rows'){args.push(value(n));return '?';}
+
     if(n.name==='map_opt'){args.push(encodeValue(expressionType(n),value(n)));return '?';}
     if(n.name==='case_when')return '(CASE WHEN '+expr(n.args[0],input,qualifier)+' THEN '+expr(n.args[1],input,qualifier)+' ELSE '+expr(n.args[2],input,qualifier)+' END)';
     if(n.name==='concat')return '('+n.args.map((a:Node)=>expr(a,input,qualifier)).join(' || ')+')';
@@ -309,10 +308,41 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
   }finally{scopes=saved;}
 
  }
+ function tableCounts(name:string):{fetched_count:number;total_count:number}{
+  const fetched_count=binding(name).length;
+  for(let source=name;;){
+   const total=tableTotals.get(source);
+   if(total!==undefined)return {fetched_count,total_count:total};
+   let input=p.bindings.get(source)?.plan;
+   while(input?.kind==='order'||input?.kind==='project'&&!input.aggregate&&input.input?.kind!=='group'&&
+         !input.fields?.some(field=>field.value.k==='call'&&field.value.name==='not_none'))input=input.input;
+   if(input?.kind!=='source'||input.join||input.sources?.length!==1)break;
+   source=input.sources[0].binding;
+   if(p.bindings.get(source)?.plan?.withTotal)binding(source);
+  }
+  return {fetched_count,total_count:fetched_count};
+ }
  function globalBinding(name:string):any {
   if(cache.has(name))return cache.get(name);const b=p.bindings.get(name)!;let v:any;
   if(b.kind==='model'){v=remote(name);if(b.type.kind==='option')v=v.length?{tag:'Some',value:v[0]}:{tag:'None'};}
-  else if(b.kind==='select'){if(b.internal)throw Error('A node-local relation plan cannot be materialized independently');if(b.result?.maxRows===undefined||b.result.maxRows>500)throw Error('Cannot materialize an unbounded intermediate plan: '+name);const args:any[]=[];const text=sql(name,args);v=execute(name,text,args).map(row=>({...row}));
+  else if(b.kind==='select'){if(b.internal)throw Error('A node-local relation plan cannot be materialized independently');if(b.result?.maxRows===undefined||b.result.maxRows>500)throw Error('Cannot materialize an unbounded intermediate plan: '+name);const args:any[]=[];
+   if(b.plan?.withTotal){
+    const input=planSql(b.plan.input!,args);
+    const order=b.plan.input!.result.ordering.map(term=>quote(term.key)+' '+term.direction).join(', ');
+    const orderBy=order?' ORDER BY '+order:'';
+    const keys=new Set([...Object.keys(b.plan.result.element.fields!),...b.plan.input!.result.ordering.map(term=>term.key)]);
+    let countKey='_dari_total';while(keys.has(countKey))countKey+='_';
+    let marker='_dari_present';while(keys.has(marker)||marker===countKey)marker+='_';
+    const text='WITH input AS MATERIALIZED ('+input+'), page AS (SELECT *, 1 AS '+quote(marker)+
+     ' FROM input'+orderBy+' LIMIT '+b.plan.count+') SELECT page.*, totals.total AS '+quote(countKey)+
+     ' FROM (SELECT COUNT(*) AS total FROM input) AS totals LEFT JOIN page ON TRUE'+orderBy;
+    const rows=execute(name,text,args);
+    const count=rows[0]?.[countKey];
+    v=rows.filter(row=>row[marker]===1).map(({[countKey]:_count,[marker]:_marker,...row})=>row);
+    if(typeof count!=='number'||!Number.isSafeInteger(count)||v.length!==Math.min(b.plan.count!,count))
+     throw Error('Local result contradicts its exact total row count: '+name);
+    tableTotals.set(name,count);
+   }else v=execute(name,sql(name,args),args);
    if(b.result?.maxRows!==undefined&&v.length>b.result.maxRows)throw Error('Model result exceeds published row bound: '+name);
    const element=b.result!.element;
    v=v.map((row:any)=>convert(element,row,'decode'));
@@ -359,6 +389,16 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
  function presentationSpec(n:Node):any {
   const spec={...n.checkedSpec,...(n.checkedTimeFormats?{formats:Object.fromEntries(Object.entries(n.checkedTimeFormats).map(([key,format])=>[key,resolvedTimeFormat(format)]))}:{})};
   const sort=n.checkedSortHeader;
+  if(n.checkedValueLabels){
+   spec.value_labels=Object.fromEntries(Object.entries(n.checkedValueLabels).map(([key,config])=>{
+    const {entries,fallback}=config as {entries:Node;fallback?:Node};
+    return [key,{fallback:fallback?value(fallback):undefined,entries:entries.items.map((entry:Node)=>{
+     const input=value(entry.fields.find((field:Node)=>field.name==='value').value);
+     const label=value(entry.fields.find((field:Node)=>field.name==='label').value);
+     return [input && typeof input==='object' && typeof input.tag==='string'?display(input):input,label];
+    })}];
+   }));
+  }
   if(sort)spec.labels={...spec.labels,[sort.column]:(spec.labels?.[sort.column]??sort.column)+(sort.direction==='asc'?' ↑':' ↓')};
   return spec;
  }
@@ -387,12 +427,10 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
  function renderChart(n:Node):import('./host.ts').FigureOutput {
   const a=Object.fromEntries(n.attrs.map((f:Node)=>[f.name,f.value]));const ref=(key:string)=>a[key].path[0];
   for(const key of ['data','nodes'])if(a[key]){const b=p.bindings.get(ref(key));if(b?.result?.maxRows===undefined||b.result.maxRows>MAX_PRESENTATION_ROWS||(!b.pivot&&binding(ref(key)).length>MAX_PRESENTATION_ROWS))throw Error('Presentation requires a proven and actual bound <= '+MAX_PRESENTATION_ROWS);}
-  const withTotal=(figure:import('./host.ts').FigureOutput,shown:number):import('./host.ts').FigureOutput=>{
+  const withTotal=(figure:import('./host.ts').FigureOutput):import('./host.ts').FigureOutput=>{
    if(figure.kind!=='table')return figure;
-   const total=remoteTotals.get(n.checkedTotalSource);
-   const count=total===undefined?undefined:shown<total?`共 ${total} 条，展示 ${shown} 条`:`共 ${total} 条`;
-   if(!count)return figure;
-   const summary=count;
+   const {fetched_count,total_count}=tableCounts(ref('data'));
+   const summary=fetched_count<total_count?`共 ${total_count} 条，展示 ${fetched_count} 条`:`共 ${total_count} 条`;
    return {...figure,content:summary+'\n\n'+figure.content,
     html:'<p>'+html(summary)+'</p>'+(figure.html??''),dataText:summary+'\n\n'+(figure.dataText??figure.content)};
   };
@@ -436,7 +474,7 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
     displayRows.map(row=>'<tr>'+row.map(value=>'<td>'+ (value==null?'':html(value))+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
    const csv=csvCells([csvHeaders,...csvRows]);
    const fence='`'.repeat(Math.max(3,...(csv.match(/`+/g)??[]).map(run=>run.length+1)));
-   return {kind:'table',content,html:tableHtml,title:spec.title,dataText:fence+'csv\n'+csv+'\n'+fence};
+   return withTotal({kind:'table',content,html:tableHtml,title:spec.title,dataText:fence+'csv\n'+csv+'\n'+fence});
   }
   if(n.checkedSpec&&p.host){
    const rows=(name:string)=>binding(name).map((row:any)=>Object.fromEntries(Object.entries(row).map(([k,v]:[string,any])=>[k,v&&typeof v==='object'&&typeof v.tag==='string'?display(v):v])));
@@ -450,7 +488,7 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
      row[pivot.values]=pivotCell(raw[i][pivot.values]);
     }
    }
-   try{return withTotal(p.host.renderFigure(n.name,presentationSpec(n),data,n.checkedFields,nodes),data.length);}
+   try{return withTotal(p.host.renderFigure(n.name,presentationSpec(n),data,n.checkedFields,nodes));}
    catch(error){
     const asset=[...p.bindings].filter(([,b])=>b.kind==='tree'&&b.ast.root.at<=n.at).sort((a,b)=>b[1].ast.root.at-a[1].ast.root.at)[0]?.[0];
     const message=n.name+'(data = '+ref('data')+'): '+(error as Error).message;
@@ -461,9 +499,16 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
   if(n.name==='Table'){
    const spec=presentationSpec(n),fields=n.checkedFields,rows=binding(ref('data')),columns=spec.columns??Object.keys(fields),labels=spec.labels??{};
    if(!rows.length&&!spec.allow_no_data)throw Error('Table has no data; set allow_no_data:True when an empty result is acceptable');
-   const content='| '+columns.map((key:string)=>md(labels[key]??key)).join(' | ')+' |\n| '+columns.map(()=>'---').join(' | ')+' |\n'+rows.map((row:any)=>'| '+columns.map((key:string)=>md(presented(fields[key],row[key],spec.precision,spec.formats?.[key]))).join(' | ')+' |').join('\n');
-   const tableHtml='<table><thead><tr>'+columns.map((key:string)=>'<th>'+html(labels[key]??key)+'</th>').join('')+'</tr></thead><tbody>'+rows.map((row:any)=>'<tr>'+columns.map((key:string)=>'<td>'+html(presented(fields[key],row[key],spec.precision,spec.formats?.[key]))+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
-   return withTotal({kind:'table',content,html:tableHtml,title:spec.title},rows.length);
+   const cell=(row:SqlRow,key:string)=>{
+    const mapping=Object.hasOwn(spec.value_labels??{},key)?spec.value_labels[key]:undefined;
+    const input=Object.hasOwn(row,key)?row[key]:readProjection(row,key.split('.'));
+    const identity=input&&typeof input==='object'&&'tag' in input?display(input):input;
+    return mapping?.entries.find(([value]:[unknown,string])=>value===identity)?.[1]
+     ??mapping?.fallback??presented(fields[key],input,spec.precision,spec.formats?.[key]);
+   };
+   const content='| '+columns.map((key:string)=>md(labels[key]??key)).join(' | ')+' |\n| '+columns.map(()=>'---').join(' | ')+' |\n'+rows.map((row:any)=>'| '+columns.map((key:string)=>md(cell(row,key))).join(' | ')+' |').join('\n');
+   const tableHtml='<table><thead><tr>'+columns.map((key:string)=>'<th>'+html(labels[key]??key)+'</th>').join('')+'</tr></thead><tbody>'+rows.map((row:any)=>'<tr>'+columns.map((key:string)=>'<td>'+html(cell(row,key))+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
+   return withTotal({kind:'table',content,html:tableHtml,title:spec.title});
   }
   if(n.name==='ColumnChart'){
    const rows=binding(ref('data')).map((row:any)=>({...row,...Object.fromEntries(['x','value'].map(key=>[a[key].path.join('.'),readProjection(row,a[key].path)]))})),x=field('x'),y=field('value'),width=Math.max(320,rows.length*80),height=240,max=Math.max(1,...rows.map((r:any)=>Number(r[y]??0)));

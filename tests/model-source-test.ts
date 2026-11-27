@@ -5,7 +5,7 @@ import {SourceOffsets,canonicalIntent} from '../packages/dari-core/src/source.ts
 import {createFixtureModel} from '../packages/dari-core/src/testing/model.ts';
 import {LanguageServer} from '../packages/dari/src/lsp/server.ts';
 const {model}=createFixtureModel();
-const source='# 中文😀\r\ndata rows=query_remote! {\r\n from(demo::DeviceKpi).as!(device)\r\n |> project({label:device.name,cpu:device.cpu_usage})\r\n |> order_by(desc(device.cpu_usage)) |> take(2)\r\n};answer tree! {Answer []};';
+const source='# 中文😀\r\ndata rows=query_remote! {\r\n from(demo::DeviceKpi).as!(device)\r\n |> project({label:device.name,cpu:device.cpu_usage})\r\n |> order_by(desc(device.cpu_usage)) |> top(2)\r\n};answer tree! {Answer []};';
 let recorded:ReturnType<typeof encodeIntent>;
 check(source,{...model,check_type(intent,encoded){recorded=encoded;return model.check_type(intent,encoded);}});
 const offsets=new SourceOffsets(source),wire:any=recorded!.wire;

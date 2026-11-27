@@ -13,7 +13,7 @@ try{
   assert.equal(resolve(program,sqlite(db),{request:{n:null}}).answer,'*7*');assert.equal(calls,1);
  }
  db.exec('CREATE TABLE sample(n INTEGER);INSERT INTO sample VALUES(42)');
- const program=check('data src:Table(Schema({n:Option(Int)}))=source("sample");data rows=query! {from(src).as!(r) |> project({n:r.n.unwrap_or!(fallback())}).as!(result) |> order_by(desc(result.n)) |> take(10)};answer tree! {Answer [Table(data =rows)]};',undefined,{host,allowTestSources:true});
+ const program=check('data src:Table(Schema({n:Option(Int)}))=source("sample");data rows=query! {from(src).as!(r) |> project({n:r.n.unwrap_or!(fallback())}).as!(result) |> order_by(desc(result.n)) |> top(10)};answer tree! {Answer [Table(data =rows)]};',undefined,{host,allowTestSources:true});
  calls=0;assert.deepEqual(resolve(program,sqlite(db)).values.rows,[{n:42}]);assert.equal(calls,0);db.exec('INSERT INTO sample VALUES(NULL)');assert.deepEqual(resolve(program,sqlite(db)).values.rows,[{n:42},{n:7}]);assert(calls>0);assert.equal(show(program.bindings.get('rows')!.type),'Table(Schema({n: Int}))');
  assert.throws(()=>check('data x=ratio(1,2).unwrap_or!(0.0);answer tree! {Answer []};'),/Option\(T\) and T/);
  assert.throws(()=>check('data x=1.unwrap_or!(2);answer tree! {Answer []};'),/Option\(T\) and T/);

@@ -12,7 +12,7 @@ function rejected(source:string,message:string,expression?:string){
  assert.equal(result.diagnostics.length,1);
  return result.diagnostics[0];
 }
-const ungrouped='data result=query_remote! {let a=from(demo::DeviceKpi);let output=a |> project({name:a.name,owner:a.tenant_id,cpu:a.cpu_usage});output |> order_by(desc(output.cpu)) |> take(5)};answer tree! {Answer []};';
+const ungrouped='data result=query_remote! {let a=from(demo::DeviceKpi);let output=a |> project({name:a.name,owner:a.tenant_id,cpu:a.cpu_usage});output |> order_by(desc(output.cpu)) |> top(5)};answer tree! {Answer []};';
 const missing=rejected(ungrouped,refusal,'a.tenant_id');
 assert.equal(missing.code,'model-grouping');assert.equal(missing.expression,'a.tenant_id');
 assert.match(missing.suggestion!,/group_by_identity\(a\)/);
@@ -23,7 +23,7 @@ const invalid=rejected(grouped,refusal,'a.name');
 assert.equal(invalid.code,'model-grouping');assert.match(invalid.reason!,/已经按身份分组/);
 assert.match(invalid.suggestion!,/保留记录粒度/);
 assert(!invalid.suggestion!.includes('group_by_identity(a)'),'Do not advise repeating an existing grouping');
-const optional='data picked:Option(demo::TenantId)=None;data result=query_remote! {let a=from(demo::DeviceKpi);let filtered=a |> filter(a.name == "A") |> filter(a.tenant_id == picked);let output=filtered |> project({name:a.name});output |> order_by(asc(output.name)) |> take(5)};answer tree! {Answer []};';
+const optional='data picked:Option(demo::TenantId)=None;data result=query_remote! {let a=from(demo::DeviceKpi);let filtered=a |> filter(a.name == "A") |> filter(a.tenant_id == picked);let output=filtered |> project({name:a.name});output |> order_by(asc(output.name)) |> top(5)};answer tree! {Answer []};';
 const parameter=rejected(optional,'Nullable filter parameter requires explicit unwrap_or!(comparison, False) or True','a.tenant_id == picked');
 assert.equal(parameter.code,'model-optional-predicate');
 assert.match(parameter.suggestion!,/unwrap_or!\(a.tenant_id == picked, False\)/);

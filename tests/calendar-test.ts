@@ -42,7 +42,7 @@ const example=check(readFileSync(new URL('../examples/calendar.dari',import.meta
 assert.match(resolve(example,sqlite(db),{}, {context:{epochMillis:Date.parse('2026-11-12T00:00:00Z'),timeZone:'Asia/Shanghai'}}).answer,/2026-02-01/);
 const bounded=check(`data w=at_zone(calendar_period(LocalDate("2026-02-01"),CalendarUnit::Month),TimeZone("UTC"));
 data t=table([{ts:EpochMillis(1769904000000)},{ts:EpochMillis(1772323200000)}]);
-data rows=query! {let a=from(t);let selected=a |> filter(a.ts>=w.start && a.ts<w.end) |> project({ts:a.ts});selected |> order_by(asc(selected.ts)) |> take(5)};
+data rows=query! {let a=from(t);let selected=a |> filter(a.ts>=w.start && a.ts<w.end) |> project({ts:a.ts});selected |> order_by(asc(selected.ts)) |> top(5)};
 answer tree! {Answer [Table(data =rows)]};`);
 assert.equal(resolve(bounded,sqlite(db)).values.rows.length,1);
 db.close();

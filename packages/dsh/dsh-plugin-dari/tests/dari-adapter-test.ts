@@ -24,9 +24,9 @@ try{
  assert.equal(info.data.items.find((i:any)=>i.id==='entities/device').dari.datasets[0].symbol,'ic::device_kpi');
  writeFileSync(join(root,'test.dari'),`data ctx = context! { epoch_millis: Context::Now, time_zone: Context::ClientTz };
  data rows = query_remote! {let a = from(ic::device_kpi);let output = a |> group_by_identity(a)
- |> project({device:a.device_kpi_res_id,cpu:a.cpu_usage}); output |> order_by(desc(output.cpu)) |> take(5)};
+ |> project({device:a.device_kpi_res_id,cpu:a.cpu_usage}); output |> order_by(desc(output.cpu)) |> top(5)};
 
- data local=query! {from(rows).as!(r) |> project({device:r.device,cpu:r.cpu}).as!(out) |> take(5)};
+ data local=query! {from(rows).as!(r) |> project({device:r.device,cpu:r.cpu}).as!(out) |> top(5)};
  report report = tree! {Report [h1 ["CPU"],Table(data = rows),BarChart(data = rows, spec = {category:$.device,value:$.cpu})]};
  answer tree! {Answer [UseValue(ref = ctx.time_zone),Table(data = local),UseReport(ref = report),BarChart(data = rows, spec = {category:$.device,value:$.cpu})]};`);
  const checked:any=await call('dari_check',{src:'test.dari'});assert.match(checked.text,/Succeed/);

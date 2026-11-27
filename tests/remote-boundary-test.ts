@@ -22,40 +22,40 @@ function fixture(rows:SqlRow[]){
  const clean=()=>assert.deepEqual(db.prepare("SELECT name FROM sqlite_temp_master WHERE type='table'").all(),[]);
  return {db,model,trace,local,run,clean};
 }
-const remote=(n:number,columns='id:a.id,rate:a.rate,phase:a.phase,active:a.active,clock:a.clock,epoch:a.epoch,n:a.n')=>`data raw=query_remote! {from(demo::Device).as!(a) |> project({${columns}}).as!(r) |> order_by(asc(r.id)) |> take(${n})};`;
+const remote=(n:number,columns='id:a.id,rate:a.rate,phase:a.phase,active:a.active,clock:a.clock,epoch:a.epoch,n:a.n')=>`data raw=query_remote! {from(demo::Device).as!(a) |> project({${columns}}).as!(r) |> order_by(asc(r.id)) |> top(${n})};`;
 const answer=(body:string)=>'answer tree! {Answer ['+body+']};';
 {
  const f=fixture([sample('Z',null),sample('A'),sample('M')]);
  try {
   const direct=f.run(remote(3)+answer('Table(data=raw)'));assert.equal(f.trace.calls,1);assert.equal(f.trace.imports,0);assert.equal(f.trace.sql.length,0);assert.deepEqual(direct.values.raw[0],{id:'Z',rate:0.12,phase:'Up',active:true,clock:'2026-11-16T00:00:00.000Z',epoch:1794787200000,n:null});
-  const result=f.run(remote(3)+`data top=query! {from(raw).as!(r) |> project({id:r.id,rate:r.rate,phase:r.phase,active:r.active,clock:r.clock,epoch:r.epoch,n:r.n}).as!(out) |> take(2)};data other=query! {from(raw).as!(r) |> project({id:r.id}).as!(out) |> take(1)};`+answer('Table(data=raw),Table(data=top),Table(data=other)'));
+  const result=f.run(remote(3)+`data top=query! {from(raw).as!(r) |> project({id:r.id,rate:r.rate,phase:r.phase,active:r.active,clock:r.clock,epoch:r.epoch,n:r.n}).as!(out) |> top(2)};data other=query! {from(raw).as!(r) |> project({id:r.id}).as!(out) |> top(1)};`+answer('Table(data=raw),Table(data=top),Table(data=other)'));
   assert.equal(f.trace.calls,2);assert.equal(f.trace.imports,1);assert.equal(f.trace.drops,1);assert.deepEqual(result.values.top,[result.values.raw[0],result.values.raw[1]]);assert.deepEqual(result.values.other,[{id:'Z'}]);f.clean();
   const before=f.trace.calls;f.run(remote(500)+answer('"unused"'));assert.equal(f.trace.calls,before);f.clean();
  }finally{f.db.close();}
 }
 {
- const f=fixture([]);try{const r=f.run(remote(3)+`data rows=query! {from(raw).as!(a) |> project({id:a.id}).as!(r) |> take(2)};`+answer('Table(data=rows,spec={allow_no_data:True})'));assert.deepEqual(r.values.rows,[]);assert.equal(f.trace.imports,1);f.clean();}finally{f.db.close();}
+ const f=fixture([]);try{const r=f.run(remote(3)+`data rows=query! {from(raw).as!(a) |> project({id:a.id}).as!(r) |> top(2)};`+answer('Table(data=rows,spec={allow_no_data:True})'));assert.deepEqual(r.values.rows,[]);assert.equal(f.trace.imports,1);f.clean();}finally{f.db.close();}
 }
 {
  const f=fixture(Array.from({length:500},(_,i)=>sample(String(i))));try{
   assert.throws(()=>check(remote(501)+answer('"unused"'),f.model),/500|bound/);
   assert.throws(()=>check(remote(500)+answer('Table(data=raw)'),f.model),/Table input data \(raw\).*110[\s\S]*已证明至多 500 行[\s\S]*调整远端节点 raw/);
   assert.equal(check(remote(50)+answer('Table(data=raw)'),f.model).bindings.get('raw')?.result?.maxRows,50);
-  const r=f.run(remote(500)+`data rows=query! {from(raw).as!(r) |> project({id:r.id}).as!(out) |> take(110)};`+answer('Table(data=rows)'));assert.equal(r.values.rows.length,110);assert.equal(f.trace.calls,1);assert.equal(f.trace.imports,1);f.clean();
-  assert.throws(()=>f.run(remote(499)+`data rows=query! {from(raw).as!(r) |> project({id:r.id}).as!(out) |> take(1)};`+answer('Table(data=rows)')),/exceeds published row bound/);assert.equal(f.trace.imports,1);f.clean();
+  const r=f.run(remote(500)+`data rows=query! {from(raw).as!(r) |> project({id:r.id}).as!(out) |> top(110)};`+answer('Table(data=rows)'));assert.equal(r.values.rows.length,110);assert.equal(f.trace.calls,1);assert.equal(f.trace.imports,1);f.clean();
+  assert.throws(()=>f.run(remote(499)+`data rows=query! {from(raw).as!(r) |> project({id:r.id}).as!(out) |> top(1)};`+answer('Table(data=rows)')),/exceeds published row bound/);assert.equal(f.trace.imports,1);f.clean();
  }finally{f.db.close();}
 }
 {
  const f=fixture([sample('a')]);try{
-  const source=remote(1)+`data rows=query! {from(raw).as!(r) |> project({id:r.id}).as!(out) |> take(1)};`+answer('Table(data=rows)');
+  const source=remote(1)+`data rows=query! {from(raw).as!(r) |> project({id:r.id}).as!(out) |> top(1)};`+answer('Table(data=rows)');
   const broken={...f.local,query(){throw Error('forced local failure');}};assert.throws(()=>resolve(check(source,f.model),broken,{},{model:f.model}),/forced local failure/);assert.equal(f.trace.drops,1);f.clean();
   const invalid={...f.model,execute(...args:Parameters<typeof f.model.execute>){const r=f.model.execute(...args);r.rows[0].epoch='wrong';return r;}};assert.throws(()=>resolve(check(source,invalid),f.local,{},{model:invalid}),/EpochMillis|Value violates/);assert.equal(f.trace.imports,1);f.clean();
-  const single=remote(1,'id:a.id').replace('take(1)','take_opt()')+answer('if let Some(row)=raw [UseValue(ref=row.id)] else ["empty"]');assert.match(f.run(single).answer,/a/);assert.equal(f.trace.imports,1);
+  const single=remote(1,'id:a.id').replace('top(1)','take_opt()')+answer('if let Some(row)=raw [UseValue(ref=row.id)] else ["empty"]');assert.match(f.run(single).answer,/a/);assert.equal(f.trace.imports,1);
  }finally{f.db.close();}
 }
 {
  const f=fixture([sample('a')]);try{
-  const split='data raw=query_remote! {from(demo::Device).as!(a) |> project({id:a.id}).as!(r) |> filter(r.id!="x") |> order_by(asc(r.id)) |> take(1)};'+answer('Table(data=raw)');
+  const split='data raw=query_remote! {from(demo::Device).as!(a) |> project({id:a.id}).as!(r) |> filter(r.id!="x") |> order_by(asc(r.id)) |> top(1)};'+answer('Table(data=raw)');
   assert.throws(()=>check(split,f.model),(error:Error)=>{
    assert.match(error.message,/Remote execution requires a proven result bound/);
    assert.match(error.message,/此 filter 开始本地处理/);
@@ -65,7 +65,7 @@ const answer=(body:string)=>'answer tree! {Answer ['+body+']};';
    assert.doesNotMatch(error.message,/@block\//);
    return true;
   });
-  const source=remote(3,'id:a.id')+`data rows=query! {let a=from(raw);let b=from(raw);a |> join(b,a.id==b.id) |> project({id:a.id}).as!(r) |> order_by(asc(r.id)) |> take(3)};`+answer('Table(data=rows)');assert.deepEqual(f.run(source).values.rows,[{id:'a'}]);assert.equal(f.trace.calls,1);assert.equal(f.trace.imports,1);f.clean();
+  const source=remote(3,'id:a.id')+`data rows=query! {let a=from(raw);let b=from(raw);a |> join(b,a.id==b.id) |> project({id:a.id}).as!(r) |> order_by(asc(r.id)) |> top(3)};`+answer('Table(data=rows)');assert.deepEqual(f.run(source).values.rows,[{id:'a'}]);assert.equal(f.trace.calls,1);assert.equal(f.trace.imports,1);f.clean();
  }finally{f.db.close();}
 }
 console.log('Remote boundary: opaque non-SQL execution, lazy imports, shared caches, ordering, codecs, empty results, cleanup and independent 500/110 bounds passed');

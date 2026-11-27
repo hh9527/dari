@@ -22,7 +22,7 @@ data rows = query_remote! {
     let linked = from(demo::device_kpi).as!(a)
         |> connect(demo::relations::device_kpi_of_device).as!(b);
     let output = linked |> project({device: b.device_name, cpu: a.cpu_usage});
-    output |> order_by(desc(output.cpu)) |> take(10)
+    output |> order_by(desc(output.cpu)) |> top(10)
 };
 ```
 
@@ -34,7 +34,7 @@ data topname = query_remote! {
     let selected = a |> filter(a.alarm_occur_utc_raw >= wins[0].start.epoch_millis
         && a.alarm_occur_utc_raw < wins[1].end.epoch_millis);
     let output = project({name:selected.alarm_name,cnt:selected.alarm_count});
-    output |> order_by(desc(output.cnt)) |> take(10)
+    output |> order_by(desc(output.cnt)) |> top(10)
 };
 ```
 
@@ -52,17 +52,34 @@ data topname = query_remote! {
 
 有限算术、lookup、unwrap_or!、round、concat、case_when、is_some/is_none 和记录映射放在前序表达式或 query!。语言不开放手写函数、递归、循环和任意代码执行。tree! 组织组件、文本、引用和展示条件，UseValue 只接受 a.b.c 形式的直接标量引用。
 
-等值标签映射优先使用 `lookup(value, [{value, label}, ...])`；范围判断或复合条件使用 case_when。查找表必须是非空静态数组，键唯一且与输入的非空业务类型一致，所有 label 的类型一致。未命中或输入为空时返回 None，可按展示口径用 unwrap_or! 提供兜底文案。例如在 query! 的 project 中为设备分类添加标签：
+远端按封闭枚举分类统计，并按数量降序展示完整分组。枚举能证明结果符合展示上界时，可省略 `take`。需要取前 N 且数量可能并列时，追加模型发布的稳定排序键。饼图直接使用查询结果。分类标签在图表的 `spec.value_labels` 中映射。
 
-```telora
-category: unwrap_or!(lookup(r.cls, [
-    {value: demo::DeviceClass::Lsw, label: "交换机"},
-    {value: demo::DeviceClass::Router, label: "路由器"},
-    {value: demo::DeviceClass::Ap, label: "无线接入点"}
-]), "未标注分类")
+```dari
+data class_rows = query_remote! {
+    let a = from(demo::Items);
+    let output = project({cls:a.category,total:a.count});
+    output |> order_by(desc(output.total))
+};
+
+data class_labels = [
+    {value: demo::Category::A, label: "甲类"},
+    {value: demo::Category::B, label: "乙类"}
+];
+
+answer tree! {
+    Answer [
+        PieChart(data = class_rows, spec = {
+            x: $.cls,
+            value: $.total,
+            value_labels: {cls: $.cls.lookup!(class_labels).unwrap_or!("未标注分类")}
+        })
+    ]
+};
 ```
 
-枚举键使用模型发布的精确符号。标签用于展示，筛选和计算保留原业务字段；lookup 不要求作者展开嵌套 case_when。
+同一配置也适用于表格单元格、分类轴和系列图例，原值保留其身份与排序。键使用输入字段的业务类型并保持唯一，展示标签为静态文本。未命中时可用 `unwrap_or!` 给出文本兜底，也可沿用原值的显示。
+
+映射结果参与本地计算时，使用 `value.lookup!(labels)`。它返回 `Option(T)`，其中 `T` 是映射表的统一值类型。映射表须为非空静态数组，输入为空或未命中时返回 `None`。
 
 `case_when(condition, then_value, else_value)` 恰好接收三个参数，条件必须为非空 Bool，两支结果类型须兼容。多个条件嵌套于 else_value，例如 `case_when(a, "甲", case_when(b, "乙", "其他"))`。可空比较产生 Option(Bool)，空值表示不命中时用 `unwrap_or!(原条件, False)`；空值语义由业务决定。
 
@@ -165,7 +182,7 @@ query! 接受可推导的投影表达式，包含聚合结果；query_remote! �
 
 ```text
 let result = r |> project({name:r.name,manufacturer:not_none(r.manufacturer)});
-result |> order_by(asc(result.name)) |> take(10)
+result |> order_by(asc(result.name)) |> top(10)
 ```
 
 公共源码中的绑定、字段、函数、参数及图表配置采用 snake_case；类型、枚举成员和扩展组件采用 PascalCase，HTML 元素保留标签名称。时间窗口边界使用 epoch_millis/date_time_utc，时区选项使用 time_zone；图表使用 allow_no_data、value_min、x_axis、formats、x_label、value_label、connect_nulls、entity_color，layout 使用 label_font、title_font、slant_ticks、tick_count。底层 JS 库的名称通过宿主适配，不构成源码别名。
@@ -243,7 +260,7 @@ query_remote! { ... } 与 context! { ... } 是具有专门语义的宏入口。c
 query! { ... } 使用关系计划专用语法。query_remote!、query!、tree!、context! 的 ! 均标记专门的语法或语义边界，不等同于副作用或立即执行；具体求值阶段由各自契约确定。filter、project、order_by、take 等普通管道算子保持函数调用形式。
 
 
-有精确总数需求时，可写 `data total = total_rows(page);`，其中 `page` 是同一稿件中以 `order_by(...) |> take(N)` 结束、且模型支持精确总数的远端清单。总数按清单的筛选、分组和投影口径在最终截取前计算。空清单的总数为 0。结果可在同一次交付中通过 `UseValue(ref = total)` 引用。 表格使用支持精确总数的远端清单时，默认显示总数。清单经本地逐行投影后继承远端顺序。表格继承远端顺序且首要排序键对应展示列时，表头以 ↑ 或 ↓ 标示方向。本地重申相同的排序键、方向和优先级时也保留箭头。逐行投影和重排均保留总数。清单截取时同时显示实际展示条数。
+有序结果用 `top(N)` 回答排名问题，返回完整的入榜结果。清单需要同时说明完整规模时，使用末尾的 `take(N)`，总数按同一口径在截取前计算。远端模型须证明能提供精确总数。表格自动显示总数和实际展示条数。正文需要引用计数时可用 `page.total_count` 或 `page.fetched_count`，两者均为 `Int`。空结果的两个计数均为 0。逐行投影和重排保留清单总数。
 
 ## 诊断反馈契约
 
@@ -305,7 +322,7 @@ data rows = query! {
     let bucketed = a |> project({day: utc_bucket(a.ts, CalendarUnit::Day), cpu: a.cpu});
     let grouped = bucketed |> group_by({day: bucketed.day})
         |> project({day: bucketed.day, cpu: avg(bucketed.cpu)});
-    grouped |> order_by(asc(grouped.day)) |> take(100)
+    grouped |> order_by(asc(grouped.day)) |> top(100)
 };
 ```
 
@@ -315,7 +332,7 @@ data rows = query! {
 data rows = query_remote! {
     let a = from(demo::device_kpi);
     let grouped = a |> project({day: utc_bucket(a.device_kpi_ts_raw, CalendarUnit::Day), cpu: a.cpu_usage});
-    grouped |> order_by(asc(grouped.day)) |> take(100)
+    grouped |> order_by(asc(grouped.day)) |> top(100)
 };
 ```
 
@@ -335,7 +352,7 @@ data daily = query_remote! {
         day: calendar_bucket(a.device_kpi_ts_raw, CalendarUnit::Day, ctx.tz),
         cpu: a.cpu_usage,
     });
-    grouped |> order_by(asc(grouped.day)) |> take(100)
+    grouped |> order_by(asc(grouped.day)) |> top(100)
 };
 ```
 

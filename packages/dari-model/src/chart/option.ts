@@ -173,6 +173,7 @@ export const buildOption = (
   rows: readonly Row[],
   spec: OptionInput,
   nodes: readonly Row[] | undefined = undefined,
+  valueLabels: {category?: ReadonlyMap<string,string>; series?: ReadonlyMap<string,string>} = {},
 ): { option: EChartsCoreOption; height: number } => {
   if (rows.length === 0) {
     if (!spec.allowNoData) throw new Error('图表没有数据；允许无数据时设置 spec.allowNoData: True');
@@ -444,18 +445,20 @@ export const buildOption = (
 
   const { categories, seriesNames, points, labels, rowByCategory } = group(rows, spec);
   const categoryLabel = (key:string) => labels.get(key) ?? key;
+  const displayCategory = (name:string) => valueLabels.category?.get(name) ?? name;
+  const displaySeries = (name:string) => valueLabels.series?.get(name) ?? name;
   for (const mark of spec.marks ?? []) if (mark.axis === 'x' && typeof mark.value === 'string') {
     if (categories.filter(key => categoryLabel(key) === mark.value).length > 1) throw new Error(`类别参考线 ${mark.value} 对应多行；请补充唯一展示标签，渲染层不会选择其中一行`);
   }
   const labelFont = spec.layout?.labelFont ?? LABEL_FONT;
   const layout = resolveLayout({
-    categories: categories.map(categoryLabel),
+    categories: categories.map(key=>displayCategory(categoryLabel(key))),
     overrides: spec.layout ?? {},
   });
   const hasLegend = (grouped || seriesNames.length > 1) && spec.kind !== 'pie' && spec.kind !== 'heatmap';
-  const frame = chartFrame(spec.title, hasLegend ? seriesNames : [], labelFont, layout.titleFont);
+  const frame = chartFrame(spec.title, hasLegend ? seriesNames.map(displaySeries) : [], labelFont, layout.titleFont);
   const horizontal = spec.kind === 'bar';
-  const categoryLines = Math.max(1, ...categories.map(name => wrapSlots(categoryLabel(name), horizontal ? 8 : 6).split('\n').length));
+  const categoryLines = Math.max(1, ...categories.map(name => wrapSlots(displayCategory(categoryLabel(name)), horizontal ? 8 : 6).split('\n').length));
   const heatmapLines = Math.max(1, ...seriesNames.map(name => wrapSlots(name, 8).split('\n').length));
   const bodyHeight = (horizontal ? Math.max(1, categories.length) * Math.max(frame.row, categoryLines * frame.line + frame.gap)
     : spec.kind === 'heatmap' ? Math.max(1, seriesNames.length) * Math.max(frame.row, heatmapLines * frame.line + frame.gap)
@@ -470,7 +473,7 @@ export const buildOption = (
   const legend = !hasLegend ? undefined : {
     top: frame.legendTop, left: frame.gap, width: CHART_WIDTH - 2 * frame.gap,
     itemWidth: labelFont, itemHeight: labelFont, itemGap: labelFont,
-    formatter: (name:string) => wrapSlots(name, 12),
+    formatter: (name:string) => wrapSlots(displaySeries(name), 12),
     textStyle: {fontSize: labelFont, lineHeight: frame.line, width: labelFont * 12, overflow: 'break' as const, color: '#1c2b3a'},
   };
   const grid = {
@@ -592,7 +595,7 @@ export const buildOption = (
           radius: [spec.donut === true ? bodyHeight * 0.25 : 0, bodyHeight * 0.38],
           center: [CHART_WIDTH / 2, frame.top + bodyHeight / 2],
           data,
-          label: { fontSize: labelFont, color: '#1c2b3a' },
+          label: { fontSize: labelFont, color: '#1c2b3a', formatter: ({name}:{name:string})=>displayCategory(name) },
           labelLine: { length: 10, length2: 10 },
         }],
       },
@@ -612,7 +615,7 @@ export const buildOption = (
       // 类别在横轴上、又挤的时候斜排；横条的类别在纵轴上，保持水平。
       rotate: !horizontal && layout.slantTicks ? 45 : 0,
       lineHeight: frame.line,
-      formatter: (name:string) => wrapSlots(name, horizontal ? 8 : 6),
+      formatter: (name:string) => wrapSlots(displayCategory(name), horizontal ? 8 : 6),
       interval: 0,
       hideOverlap: false,
     },
@@ -847,7 +850,7 @@ export const buildOption = (
         // 纵轴是分组（可能是设备名或日期），左边留得比柱状图宽一些；底部留给颜色标尺。
         grid,
         xAxis: { ...categoryAxis, data: categories },
-        yAxis: { ...verticalCategoryAxis, data: yNames, axisLabel: { fontSize: labelFont, color: '#1c2b3a', lineHeight: frame.line, rotate: 0, interval: 0, hideOverlap: false, formatter: (name:string) => wrapSlots(name, 8) } },
+        yAxis: { ...verticalCategoryAxis, data: yNames, axisLabel: { fontSize: labelFont, color: '#1c2b3a', lineHeight: frame.line, rotate: 0, interval: 0, hideOverlap: false, formatter: (name:string) => wrapSlots(displaySeries(name), 8) } },
         visualMap: {
           type: 'continuous' as const,
           min: floor,

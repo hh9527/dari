@@ -8,7 +8,7 @@ data readings = query_remote! {
       |> project({device: a.device_id, cpu: a.cpu_usage});
     projected
       |> order_by(desc(a.cpu_usage))
-      |> take(5)
+      |> top(5)
 };
 
 data highest = query! {

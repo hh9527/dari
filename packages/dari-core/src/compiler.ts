@@ -16,7 +16,7 @@ export type {Plan} from './plan.ts';
 import {primaryCodecs} from './primary-codecs.ts';
 import type {HostPort} from './host.ts';
 export type Type={kind:string;name?:string;modelLogical?:string;displayName?:string;semantic?:string;presentation?:{multiplier:number;suffix:string;precision?:number};meanResult?:Type;inner?:Type;fields?:Record<string,Type>;input?:Type;output?:Type;codec?:import('./model.ts').ValueCodec};
-export type Binding={internal?:boolean;type:Type;ast:Node;kind:string;plan?:Plan;modelPlan?:unknown;pivot?:import('./model.ts').PivotOptions;hasTotal?:boolean;includeTotal?:boolean;parameters?:Node[];result?:ResultContract};
+export type Binding={internal?:boolean;type:Type;ast:Node;kind:string;plan?:Plan;modelPlan?:unknown;pivot?:import('./model.ts').PivotOptions;includeTotal?:boolean;parameters?:Node[];result?:ResultContract};
 export type CheckedReference={at:number;path:string[];type:Type;rootType:Type;symbol?:string};
 export type CheckedTreeNode={at:number;name:string;contract?:ComponentContract;attributes:{at:number;name:string;type?:Type}[]};
 export type Program={treeNodes:CheckedTreeNode[];references:CheckedReference[];types:Map<string,Type>;bindings:Map<string,Binding>;answer:string;source:string;warnings:import('./diagnostics.ts').Diagnostic[];model?:ModelPort;modelContractId?:string;modelImplementationId?:string;contextType?:Type;contextContractId?:string;host?:HostPort};
@@ -230,7 +230,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
   }
   if(/no declared business ordering/.test(message))for(const step of intent.steps)if(step.kind==='order_by')for(const term of step.terms){
    const value=term.value,expr=value.kind==='output'?intent.steps.flatMap(s=>s.kind==='project'&&s.value.kind==='record'?[s.value.fields[value.name]]:[])[0]:value;
-   if(expr?.kind==='member'&&present(expr.member.type).codec?.variants&&!present(expr.member.type).codec?.order?.length)return new Fault(message,modelLocations.get(term.value)?.at??query.at,{stage:'model',code:'business-ordering',reason:'该分类成员没有声明业务排序，不能按其内部编码隐式排名',suggestion:'若任务只要求展示分类，在后续 query! 映射标签并按展示口径排序；业务次序须由模型声明，不能擅自当作数值或文本顺序'});
+   if(expr?.kind==='member'&&present(expr.member.type).codec?.variants&&!present(expr.member.type).codec?.order?.length)return new Fault(message,modelLocations.get(term.value)?.at??query.at,{stage:'model',code:'business-ordering',reason:'该分类成员没有声明业务排序，不能按其内部编码隐式排名',suggestion:'若封闭枚举能证明结果符合展示上界，可省略 take 并展示完整分组。若需排名，按业务指标排序，并为并列追加已发布的稳定排序键。若只需显示中文标签，使用 spec.value_labels。若需按枚举业务顺序排序，使用模型发布的有序整数标签'});
   }
   if(/direct member reference/.test(message))for(const step of intent.steps)if(step.kind==='project'&&step.value.kind==='record')for(const expr of Object.values(step.value.fields))if(expr.kind!=='member')return new Fault(message,modelLocations.get(expr)?.at??query.at,{stage:'model',code:'model-projection',reason:'模型仅证明已发布成员及明确支持的时间转换、not_none 投影',suggestion:'query_remote! 投影需要的成员，后续 query! 处理派生表达式；保持聚合前后筛选口径不变'});
   return new Fault(message,query.at,{stage:'model',code:'model-capability',reason:'模型未能证明该查询满足已发布的领域能力',suggestion:'根据模型拒绝原因及 模型集成发布的符号与类型契约 契约修正；不要删除筛选、关系或业务类型以绕过校验'});
@@ -259,11 +259,8 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
  }
  function assign(n:Node,wanted:Type,env:Record<string,Type>={}){const got=infer(n,env);if(!compatible(wanted,got))err(n,'Expected '+show(wanted)+'; got '+show(got),mismatchDetails(wanted,got));}
  function infer(n:Node,env:Record<string,Type>={},aggregate=false,groupKeys=new Set<string>()):Type{
-  if(n.k==='call'&&n.name==='total_rows'){
-   const arg=n.args[0],name=arg?.path?.[0];
-   const binding=arg?.k==='ref'&&arg.path.length===1&&!Object.hasOwn(env,name)?p.bindings.get(name):undefined;
-   if(n.args.length!==1||!binding?.hasTotal)return err(n,'total_rows requires a named query_remote! result with a model-supported final take(N)');
-   binding.includeTotal=true;
+  if(n.k==='ref'&&n.path.length===2&&['fetched_count','total_count'].includes(n.path[1])&&
+     !Object.hasOwn(env,n.path[0])&&p.bindings.get(n.path[0])?.type.kind==='table'){
    return n.resolvedType=scalar('Int');
   }
   if(n.k==='projection')err(n,'$.field requires an input row context; use it in figure settings or map_opt');
@@ -276,6 +273,14 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    return n.resolvedType=infer(n.result,local);
   }
   if(n.k==='literal')return scalar(n.literal);
+  if(n.k==='array'){
+   if(!n.items.length)err(n,'Cannot infer the element type of an empty array');
+   const inner=infer(n.items[0],env,aggregate,groupKeys);
+   for(const item of n.items.slice(1)){
+    if(!same(inner,infer(item,env,aggregate,groupKeys)))err(item,'Array elements must have the same type');
+   }
+   return {kind:'array',inner};
+  }
   if(n.k==='object'){const fields:Record<string,Type>=Object.create(null);settle(n.fields,(f:Node)=>{if(Object.hasOwn(fields,f.name))err(f,'Duplicate field '+f.name);fields[f.name]=infer(f.value,env,aggregate,groupKeys);});return{kind:'schema',fields};}
   if(n.k==='ref'){const v=variant(n);if(v){n.enumVariant=v;n.resolvedType=v.type;return v.type;}const [name,...path]=n.path;let t=env[name]??p.bindings.get(name)?.type;if(!t&&failed.has(name))throw new UpstreamTypeUnavailable();if(!t&&path.length&&env.out)err(n,'Unknown binding '+(n.displayPath??n.path)[0]+' after projection',{code:'projected-scope',reason:'project 后的字段属于新的结果；distinct 后也应通过当前结果名称访问',suggestion:'写 let output = rows |> project({...}) |> distinct(); output |> order_by(asc(output.field))；查询源字段用原节点，投影后的列用结果绑定'});if(!t)err(n,'Unknown binding '+name+'; available bindings: '+[...Object.keys(env),...[...p.bindings].filter(([,b])=>!b.internal).map(([name])=>name)].slice(0,8).join(', '));const rootType=t!;for(const key of path){if(t!.kind==='array'&&typeof key==='number'){t=t!.inner!;continue;}if(!['schema','range'].includes(t!.kind))err(n,'Cannot access '+key+' on '+show(t!));const next=t!.fields![key];if(!next)err(n,'Unknown field '+(n.displayPath??n.path).join('.')+'; examples: '+Object.keys(t!.fields!).slice(0,8).join(', '));t=next;}n.resolvedType=t;p.references.push({at:n.at,path:n.displayPath??n.path,type:t!,rootType});return t!;}
   if(n.k==='unary'){const t=infer(n.value,env,aggregate,groupKeys);if(!numeric(t))err(n,'Unary minus requires numeric type');calculation(n,t,'Negate');return t;}
@@ -328,6 +333,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
     try{return n.resolvedType=p.host.functions[n.name].check(settle(n.args,(a:Node)=>infer(a,env,aggregate,groupKeys)),n.args.map((a:Node)=>{try{return constant(a);}catch{return undefined;}}));}catch(e){return err(n,(e as Error).message);}
    }
    if(n.name==='lookup'){
+    if(n.args.length===2)n.args[1]=configObject(n.args[1]);
     if(n.args.length!==2||n.args[1].k!=='array'||!n.args[1].items.length)err(n,'lookup requires a value and a nonempty static [{value, label}] table');
     const input=present(infer(n.args[0],env,aggregate,groupKeys));let output:Type|undefined;const keys=new Set<string>();
     for(const entry of n.args[1].items){
@@ -397,7 +403,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
     if(t.codec?.variants)err(n,'Use a static enum variant: '+n.name+'::Variant');
     else assign(n.args[0],t.inner!,env);return t;
    }
-   if(['take_opt','take','filter','project','order_by','group_by','group_by_identity','distinct','from','join','left_join','semi_join','anti_join','union','union_all','intersect','except'].includes(n.name)){
+   if(['take_opt','take','top','filter','project','order_by','group_by','group_by_identity','distinct','from','join','left_join','semi_join','anti_join','union','union_all','intersect','except'].includes(n.name)){
     const input=n.args[0],name=input?(input.end!==undefined?source.slice(input.sourceStart??input.at,input.end):expressionHint(input)??'prepared'):'prepared';
     if(n.name==='take_opt'&&input){
      const t=infer(input,env,aggregate,groupKeys);
@@ -532,6 +538,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
     return node('order',input,{...input.result,ordering:step.args.map((t:Node)=>({key:'',direction:t.name}))},{terms:step.args});
    },
    take(input,step){return take(input,step,false);},
+   top(input,step){return take(input,step,false);},
    take_opt(input,step){return take(input,step,true);}
   };
   function take(input:Plan,step:Node,opt:boolean):Plan{
@@ -539,11 +546,13 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    if(opt){if(step.args.length)err(step,'take_opt accepts no arguments');}
    else {const n=step.args[0];if(step.args.length!==1||n.k!=='literal'||!Number.isInteger(n.value)||n.value<1||n.value>MAX_RESULT_ROWS)err(step,'take requires a static integer 1..'+MAX_RESULT_ROWS);count=n.value;}
    if(!input.result.ordering.length&&(input.result.maxRows===undefined||input.result.maxRows>1))err(step,(opt?'take_opt':'take')+' on multiple rows requires order_by',{code:'ordering-required',reason:'多行输入没有已证明的顺序，直接取前 N 行不能确定业务口径',suggestion:'按任务口径为当前具名计划选择排序字段，先 order_by 再 '+(opt?'take_opt()':'take(n)')+'；已有至多一行证明的输入无需排序'});
-   return node('take',input,{...input.result,container:opt?'option':'table',maxRows:Math.min(input.result.maxRows??count,count)},{count});
+   return node('take',input,{...input.result,container:opt?'option':'table',maxRows:Math.min(input.result.maxRows??count,count)},{count,withTotal:step.name==='take'});
   }
   const observe=(after:number)=>{for(const b of n.editorBindings??[])if(b.after===after){const type=plan.scope[b.path[0]]??plan.result.element;p.references.push({at:b.at,path:b.displayPath,type,rootType:type});}};
   observe(0);
   for(const [index,step] of n.steps.entries()){const rule=rules[step.name];if(!rule){err(step,'Unsupported plan operation '+step.name);}plan=rule(plan,step);observe(index+1);}
+  const countedStep=n.steps.find((step:Node)=>step.name==='take');
+  if(countedStep&&countedStep!==n.steps.at(-1))err(countedStep,'take must be the final query operation; use top for an intermediate ranking');
   if(plan.result.container==='grouped')err(n,'group_by requires project to define grouped output');
   const localCalendar=(value:Node):void=>{if(value.calendarFunction)err(value,'Calendar range preparation belongs in a top-level data/do node; pass its scalar endpoints into query!/query_remote!');for(const item of Object.values(value)){if(Array.isArray(item)){for(const child of item)if(child&&typeof child==='object'&&'k'in child)localCalendar(child);}else if(item&&typeof item==='object'&&'k'in item)localCalendar(item as Node);}};
   localCalendar(n);
@@ -713,8 +722,8 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    }else if(step.name==='take_opt'){
     if(step.args.length)err(step,'take_opt accepts no arguments');
     steps.push({kind:'take_opt'});
-   }else if(step.name==='take'){
-    if(step.args.length!==1||step.args[0].k!=='literal'||!Number.isInteger(step.args[0].value)||step.args[0].value<1||step.args[0].value>MAX_RESULT_ROWS)err(step,'take requires a static integer 1..500');
+   }else if(step.name==='take'||step.name==='top'){
+    if(step.args.length!==1||step.args[0].k!=='literal'||!Number.isInteger(step.args[0].value)||step.args[0].value<1||step.args[0].value>MAX_RESULT_ROWS)err(step,step.name+' requires a static integer 1..500');
     steps.push({kind:'take',count:step.args[0].value});
    }else err(step,'Unsupported model query operation '+step.name);
    for(const added of steps.slice(before))modelLocations.set(added,step);
@@ -767,7 +776,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
   if(object.k!=='object')return constant(n,fields,owner.name+'.spec');
   const formatFields=object.fields.filter((f:Node)=>f.name==='formats');
   if(formatFields.length>1)err(formatFields[1],'Duplicate presentation option formats');
-  const spec=constant({...object,fields:object.fields.filter((f:Node)=>f.name!=='formats')},fields,owner.name+'.spec');
+  const spec=constant({...object,fields:object.fields.filter((f:Node)=>!['formats','value_labels'].includes(f.name))},fields,owner.name+'.spec');
   if(formatFields.length){
    const formats=configObject(formatFields[0].value);if(formats.k!=='object')err(formats,'formats requires field names mapped to time formats');
    const checked:Record<string,unknown>={},samples:Record<string,TimeFormat>={};
@@ -777,6 +786,32 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
     const value=timeFormat(f.value,fields[f.name],env);checked[f.name]=value.checked;samples[f.name]=value.sample;
    });
    owner.checkedTimeFormats=checked;spec.formats=samples;
+  }
+  const labelFields=object.fields.filter((field:Node)=>field.name==='value_labels');
+  if(labelFields.length>1)err(labelFields[1],'Duplicate presentation option value_labels');
+  if(labelFields.length){
+   const labels=configObject(labelFields[0].value);
+   if(labels.k!=='object')err(labels,'value_labels requires field names mapped to lookup entries');
+   const checked:Record<string,{entries:Node;fallback?:Node}>=Object.create(null);
+   for(const field of labels.fields){
+    if(Object.hasOwn(checked,field.name))err(field,'Duplicate value_labels field '+field.name);
+    const expression=field.value;
+    const fallback=expression.k==='call'&&expression.name==='unwrap_or'?expression.args[1]:undefined;
+    const lookup=fallback?expression.args[0]:expression;
+    if(lookup.k!=='call'||lookup.name!=='lookup'||lookup.args.length!==2||
+       lookup.args[0].k!=='projection'||constant(lookup.args[0],fields)!==field.name)
+     err(expression,'Use $.'+field.name+'.lookup!(labels) for this display field');
+    if(fallback&&(expression.args.length!==2||typeof constant(fallback)!=='string'))
+     err(expression,'Display label fallback requires static String');
+    const entries=configObject(lookup.args[1]);
+    const type=infer({
+     ...lookup,args:[{k:'ref',path:[field.name],at:field.at},entries]
+    },fields);
+    if(!same(present(type),scalar('String')))err(field,'value_labels requires String labels');
+    checked[field.name]={entries,fallback};
+   }
+   owner.checkedValueLabels=checked;
+   spec.value_labels=Object.fromEntries(Object.keys(checked).map(key=>[key,{entries:[]} ]));
   }
   return spec;
  }
@@ -792,10 +827,6 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
   }
   for(;;){
    const binding=p.bindings.get(name)!;
-   if(binding.hasTotal){
-    binding.includeTotal=true;
-    node.checkedTotalSource=name;
-   }
    if(binding.ast.k==='query'){
     const terms:Node[]=binding.ast.steps.find((step:Node)=>step.name==='order_by')?.args??[];
     const projection=binding.ast.steps.find((step:Node)=>step.name==='project')?.args[0];
@@ -920,14 +951,15 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
   if(['Table','ColumnChart'].includes(n.name)){const bound=presentationBound('data',lookup('data'));if(bound)throw bound;}
   if(['Table','ColumnChart'].includes(n.name)){const b=lookup('data');if(b.type.kind!=='table'||b.type.inner!.kind!=='schema')err(attrs.data,'Expected Schema rows');for(const a of n.name==='ColumnChart'?['x','value']:[]){if(attrs[a].k!=='projection')err(attrs[a],'Use $.field to select a row field');const t=checkedProjection(attrs[a],b.type.inner!);let numeric=present(t);while(numeric.kind==='nominal')numeric=numeric.inner!;if(a==='value'&&!['Int','Float'].includes(numeric.name??''))err(attrs[a],'Chart value must be numeric or a newtype with numeric representation');}}
   if(n.name==='Table'){
-   const fields=lookup('data').type.inner!.fields!,spec=attrs.spec?figureSpec(attrs.spec,fields,n,env):{};
-   for(const key of Object.keys(spec))if(!['columns','labels','title','precision','allow_no_data','formats'].includes(key))err(n,'Unknown Table option '+key);
+   const rowFields=lookup('data').type.inner!.fields!,fields={...rowFields},spec=attrs.spec?figureSpec(attrs.spec,fields,n,env):{};
+   for(const key of Object.keys(spec))if(!['columns','labels','title','precision','allow_no_data','formats','value_labels'].includes(key))err(n,'Unknown Table option '+key);
    const columns=spec.columns??Object.keys(fields);
    if(!Array.isArray(columns)||columns.some((key:unknown)=>typeof key!=='string'||!Object.hasOwn(fields,key as string)))err(n,'Table columns must reference existing fields');
    if(spec.labels!==undefined&&(!spec.labels||typeof spec.labels!=='object'||Array.isArray(spec.labels)||Object.entries(spec.labels).some(([key,label])=>!Object.hasOwn(fields,key)||typeof label!=='string')))err(n,'Table labels require existing field names and text labels');
    if(spec.allow_no_data!==undefined&&typeof spec.allow_no_data!=='boolean')err(n,'Table allow_no_data requires Bool');
    if(spec.title!==undefined&&typeof spec.title!=='string')err(n,'Table title requires static text');
    if(spec.precision!==undefined)try{precision(spec.precision);}catch(e){err(n,(e as Error).message);}
+   n.checkedPaths=Object.keys(fields).filter(key=>!Object.hasOwn(rowFields,key)).map(key=>key.split('.'));
    n.checkedSpec=spec;n.checkedFields=fields;
    checkTableTotal(n,attrs.data);
   }
@@ -1061,6 +1093,10 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
       });
     }
    }else if(shape.pivot)err(d,'Model returned an unexpected pivot contract');
+   const countedStep=d.value.steps.find((step:Node)=>step.name==='take');
+   if(countedStep&&countedStep!==d.value.steps.at(-1))err(countedStep,'take must be the final query operation; use top for an intermediate ranking');
+   const counted=d.value.steps.at(-1)?.name==='take';
+   if(counted&&!shape.hasTotal)err(d.value.steps.at(-1),'take requires model support for an exact total; use top for a ranked result');
    const take=intent.steps.find(s=>s.kind==='take'||s.kind==='take_opt');
    if(take?.kind==='take_opt'&&(shape.maxRows===undefined||shape.maxRows>1))err(d,'Model result bound exceeds the authored take_opt');
    const expectedContainer=d.value.steps.at(-1)?.name==='take_opt'?'option':'table';
@@ -1074,7 +1110,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
     const suggestion=split?.name==='filter'
      ?'若筛选针对聚合前的记录，将它移到远端 project 前。若筛选依赖聚合结果，请保留筛选与排名顺序，并为远端结果建立符合业务口径的上界。'
      :split?'为远端阶段建立符合业务口径的上界，再执行本地处理。只有符合查询口径时才在远端提前截取。'
-     :'在远端阶段结束前 order_by(...) |> take(n)，n <= '+MAX_RESULT_ROWS+'，再进行本地后处理';
+     :'在远端阶段结束前 order_by(...) |> top(n)，n <= '+MAX_RESULT_ROWS+'，再进行本地后处理';
     err(split??d,'Remote execution requires a proven result bound <= '+MAX_RESULT_ROWS,{
      code:'query-bound',
      ...(split?{end:split.end}:{}),
@@ -1094,13 +1130,13 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
   if(!d.internal){
    if(kind==='model'||d.remoteBoundary){
     const bound=plan?.result.maxRows??modelShape?.maxRows;
-    if(bound===undefined||bound>MAX_RESULT_ROWS)err(d,'Remote query data node requires a proven result bound <= '+MAX_RESULT_ROWS,{code:'query-bound',reason:'query_remote! 是远端取数边界，不能将无上界结果交给本地查询再截断',suggestion:'在本查询返回前按业务口径 order_by(...) |> take(n)，n <= 500；全表单行聚合或已有有限输入的推导上界也可成立。本地 query! 可以组合无界 SQL 计划，但物化与展现前必须证明有界'});
+    if(bound===undefined||bound>MAX_RESULT_ROWS)err(d,'Remote query data node requires a proven result bound <= '+MAX_RESULT_ROWS,{code:'query-bound',reason:'query_remote! 是远端取数边界，不能将无上界结果交给本地查询再截断',suggestion:'在本查询返回前按业务口径 order_by(...) |> top(n)，n <= 500；全表单行聚合或已有有限输入的推导上界也可成立。本地 query! 可以组合无界 SQL 计划，但物化与展现前必须证明有界'});
    }
    const role=d.declarationKind;
    if(role==='data'&&['answer','figure','report','content'].includes(t!.kind))err(d,'data requires a data value; put charts inline in report or answer');
    if(['report','answer'].includes(role)&&(d.value.k!=='tree'||t!.kind!==role))err(d,role+' requires tree! with a '+(role==='answer'?'Answer':role==='report'?'Report':'chart or Table')+' root');
   }
-  if(d.annotation){const wanted=type(d.annotation);if(!compatible(wanted,t!))err(d,'Declaration annotation expects '+show(wanted)+'; got '+show(t!),mismatchDetails(wanted,t!));}if(d.editorBinding){const b=d.editorBinding;p.references.push({at:b.nameAt??b.at,path:[b.displayName??b.name],type:t!,rootType:t!});}p.bindings.set(d.name,{internal:!!d.internal,type:t!,ast:d.value,kind,plan,modelPlan:modelShape?.plan,pivot:modelShape?.pivot,hasTotal:modelShape?.hasTotal,parameters,result:plan?.result??(modelShape?{element:modelShape.element,container:t!.kind==='option'?'option':'table',maxRows:modelShape.maxRows,ordering:modelOrdering}:kind==='literal_table'?{element:t!.inner!,container:'table',maxRows:d.value.args[0].items.length,ordering:[]}:kind==='source'?{element:t!.inner!,container:'table',ordering:[]}:undefined)});
+  if(d.annotation){const wanted=type(d.annotation);if(!compatible(wanted,t!))err(d,'Declaration annotation expects '+show(wanted)+'; got '+show(t!),mismatchDetails(wanted,t!));}if(d.editorBinding){const b=d.editorBinding;p.references.push({at:b.nameAt??b.at,path:[b.displayName??b.name],type:t!,rootType:t!});}p.bindings.set(d.name,{internal:!!d.internal,type:t!,ast:d.value,kind,plan,modelPlan:modelShape?.plan,pivot:modelShape?.pivot,includeTotal:kind==='model'&&d.value.steps.at(-1)?.name==='take',parameters,result:plan?.result??(modelShape?{element:modelShape.element,container:t!.kind==='option'?'option':'table',maxRows:modelShape.maxRows,ordering:modelOrdering}:kind==='literal_table'?{element:t!.inner!,container:'table',maxRows:d.value.args[0].items.length,ordering:[]}:kind==='source'?{element:t!.inner!,container:'table',ordering:[]}:undefined)});
   }catch(error){finding(error);if(!p.bindings.has(d.name)&&!p.types.has(d.name))failed.add(d.name);}
  }
  if(diagnostics.hasErrors()&&!partial)throw new DiagnosticFailure(source,diagnostics.list(),p.warnings);

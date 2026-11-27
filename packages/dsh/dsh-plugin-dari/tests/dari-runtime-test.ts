@@ -16,7 +16,7 @@ try{
  // 集成模块从源码取 dariHost：若从插件 bundle 自身导入会形成循环（entry 正在 TLA 中）。
  writeFileSync(integration,`import {dariHost} from ${JSON.stringify(pathToFileURL(join(repo,'packages/dari-model/src/index.ts')).href)};export function createIntegration(){return {options:{host:dariHost}};}`);
  const database=join(root,'test.sqlite');new DatabaseSync(database).close();
- const source='data rows=table([{name:"A",n:1},{name:"B",n:2}]);data top=query! {let a=from(rows);let output=a |> project({name:a.name,n:a.n});output |> order_by(desc(output.n)) |> take(1)};answer tree! {Answer [BarChart(data=top,spec={category:$.name,value:$.n})]};';
+ const source='data rows=table([{name:"A",n:1},{name:"B",n:2}]);data top=query! {let a=from(rows);let output=a |> project({name:a.name,n:a.n});output |> order_by(desc(output.n)) |> top(1)};answer tree! {Answer [BarChart(data=top,spec={category:$.name,value:$.n})]};';
  const service=join(plugin,'lib/index.mjs');
  const child=spawn(process.execPath,[service,'--integration',integration,'--database',database],{cwd:root,env:{...process.env,DARI_SERVICE:'1'}});
  let output='',errors='';child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>errors+=b);

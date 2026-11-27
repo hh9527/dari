@@ -23,4 +23,5 @@ export type Plan={
  keys?:Node[];
  terms?:Node[];
  count?:number;
+ withTotal?:boolean;
 };
