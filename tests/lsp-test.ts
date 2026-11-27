@@ -58,7 +58,7 @@ assert.match((remoteServer.handle('textDocument/hover',{textDocument:{uri},posit
 // Tree node and attribute names carry their component contract, not lexical names.
 const tree='data rows=table([{name:"A",n:1}]);data value=42;report report=tree! {Report(title="Summary") [p [UseValue(ref=value,precision=1)],Table(data=rows)]};answer tree! {Answer [UseReport(ref=report)]};';
 assert.match(ask('hover',tree,tree.indexOf('Report(title')).contents.value,/Report\(/);
-assert.match(ask('hover',tree,tree.indexOf('Table(data')).contents.value,/`data`（必填）：`Table\(Schema\)`/);
+assert.match(ask('hover',tree,tree.indexOf('Table(data')).contents.value,/`data`（必填）：`Table\(Schema\) \| Pivot\(Index, Key, Value\)`/);
 assert.match(ask('hover',tree,tree.indexOf('data=rows')).contents.value,/Table\.data: Table\(Schema\(\{name: String, n: Int\}\)\)/);
 assert.match(ask('hover',tree,tree.indexOf('ref=value')).contents.value,/UseValue\.ref: Int/);
 assert.match(ask('hover',tree,tree.indexOf('precision=')).contents.value,/可选.*小数位数/);

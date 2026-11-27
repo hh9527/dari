@@ -26,3 +26,5 @@ export type {ModelLocation} from './syntax.ts';
 export {registerCalendarFunctions} from './calendar.ts';
 
 export {registerSqliteRegexp} from './database.ts';
+
+export {csvCells} from './csv.ts';

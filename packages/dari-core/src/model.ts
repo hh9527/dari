@@ -31,7 +31,7 @@ export type QueryExprType =
     {kind:'call';name:string;args:QueryExprType[]} |
     {kind:'binary';op:string;left:QueryExprType;right:QueryExprType} |
     {kind:'unary';op:string;value:QueryExprType};
-export type PivotOptions = {index:string;columns:string;values:string;max_rows:number;max_columns:number};
+export type PivotOptions = {index:string;columns:string;values:string;max_rows:number;max_columns:number;rank_columns?:'SumDescKeyAsc'};
 export type QueryOperation =
     {kind:'pivot';options:PivotOptions} |
     {kind:'connect';relation:RelationSymbol;from:number;to:number} |

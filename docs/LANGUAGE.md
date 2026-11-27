@@ -98,7 +98,9 @@ query! 可连续 filter、project，也可在 take 后继续处理有界表。�
 
 每个顶层 query_remote! 数据节点必须证明不超过 500 行；每个 Table 或图表输入必须证明不超过 110 行。已知输入上界时不强制重复 take。take_opt 改变容器类型，不能继续应用表算子。group_by 产生待投影的分组契约，只接受 project 消费；重复分组会给出分组诊断，不伪装成投影位置错误。
 
-远端聚合可用末端 `pivot({index: $.hour, columns: $.category, values: $.metric, max_rows: 48, max_columns: 12})`。当前模型检查接受两个非空分组维度和一个度量的投影。结果类型为 `Pivot(Index, Key, Value)`，可直接作为 `LineChart` 的 `data`，横轴、序列和指标来自 pivot 配置。SQLite 在远端分别核验整个结果的行数和序列数，超出任一预算时提交整次失败。图表的行数限制按索引轴计算。
+远端聚合可用末端 `pivot({index: $.hour, columns: $.category, values: $.metric, max_rows: 48, max_columns: 12})`。当前模型检查接受两个非空分组维度和一个度量的投影。结果类型为 `Pivot(Index, Key, Value)`，可直接作为 `Table` 或 `LineChart` 的 `data`，横轴、序列和指标来自 pivot 配置。检查时从有限枚举或显式键筛选证明序列数不超过 `max_columns`。SQLite 在远端分别核验整个结果的行数和序列数，超出任一预算时提交整次失败。图表的行数限制按索引轴计算。
+
+`Table(data = hourly)` 和 `LineChart(data = hourly)` 共用一次 Pivot 查询。表格以索引为首列，为整个结果中出现的每个键生成一列，最多 12 个数据列。缺测和空指标留空，零照常展示。表格回执为宽 CSV，折线图回执为长 CSV。Pivot 表格支持 `spec.title` 和 `spec.allow_no_data`。
 
 query_remote!/query! 共享算子的结果含义，但外部模型仍可拒绝尚未实现的组合；不能将 query! 的本地组合能力等同于具体模型已支持全部远端组合。
 

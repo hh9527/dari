@@ -11,7 +11,7 @@ import {faultDiagnostic,DiagnosticCollector,DiagnosticFailure,UpstreamTypeUnavai
 import {encodeIntent,proofTarget,verifyReceipt,storage,ModelCheckFailure} from './model.ts';
 import type {ModelCheckPort as ModelPort,CheckedIntent,IntentType,QueryExprType,QueryOperation} from './model.ts';
 import {parse,Fault,type FaultDetails,type Node} from './syntax.ts';
-import {MAX_RESULT_ROWS,MAX_PRESENTATION_ROWS,type Plan,type ResultContract,type Ordering} from './plan.ts';
+import {MAX_RESULT_ROWS,MAX_PRESENTATION_ROWS,MAX_PIVOT_TABLE_COLUMNS,type Plan,type ResultContract,type Ordering} from './plan.ts';
 export type {Plan} from './plan.ts';
 import {primaryCodecs} from './primary-codecs.ts';
 import type {HostPort} from './host.ts';
@@ -684,7 +684,9 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
     const [options]=step.args;
     if(step.args.length!==1||options.k!=='object')err(step,'pivot requires a record of axis projections and budgets');
     const fields=new Map<string,Node>(options.fields.map((field:Node)=>[field.name,field.value]));
-    if(fields.size!==5||options.fields.length!==5)err(options,'pivot requires index, columns, values, max_rows and max_columns');
+    const rank=fields.get('rank_columns');
+    const size=rank?6:5;
+    if(fields.size!==size||options.fields.length!==size)err(options,'pivot requires index, columns, values, max_rows and max_columns, with optional rank_columns');
     const axis=(key:string)=>{
      const field=fields.get(key);
      if(field?.k!=='projection'||field.path.length!==1||field.path[0].endsWith('?'))return err(field??options,'pivot '+key+' requires a direct projected field selector');
@@ -695,7 +697,19 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
      if(field?.k!=='literal'||!Number.isInteger(field.value)||field.value<1||field.value>MAX_RESULT_ROWS)return err(field??options,'pivot '+key+' requires a static integer 1..500');
      return field.value;
     };
-    steps.push({kind:'pivot',options:{index:axis('index'),columns:axis('columns'),values:axis('values'),max_rows:budget('max_rows'),max_columns:budget('max_columns')}});
+    const index=axis('index'),columns=axis('columns'),values=axis('values');
+    if(rank){
+     const [score,tie]=rank.items??[];
+     const selects=(node:Node|undefined,field:string)=>node?.k==='projection'&&node.path.length===1&&node.path[0]===field;
+     const metric=score?.args?.[0];
+     if(rank.k!=='array'||rank.items.length!==2||score.k!=='call'||score.name!=='desc'||score.args.length!==1||
+      metric?.k!=='call'||metric.name!=='sum'||metric.args.length!==1||!selects(metric.args[0],values)||
+      tie.k!=='call'||tie.name!=='asc'||tie.args.length!==1||!selects(tie.args[0],columns)){
+      err(rank,'Use rank_columns: [desc(sum($.'+values+')), asc($.'+columns+')] to select the top max_columns keys across the full window');
+     }
+    }
+    steps.push({kind:'pivot',options:{index,columns,values,max_rows:budget('max_rows'),max_columns:budget('max_columns'),
+     ...(rank?{rank_columns:'SumDescKeyAsc' as const}:{})}});
    }else if(step.name==='take_opt'){
     if(step.args.length)err(step,'take_opt accepts no arguments');
     steps.push({kind:'take_opt'});
@@ -845,6 +859,23 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
      :'调整展现输入 '+name+'，按任务口径聚合，或在最后需要本地处理的节点排序并取所需条数'
    });
   }
+  const pivotTable=n.name==='Table'&&attrs.data?.k==='ref'&&attrs.data.path.length===1
+   ?p.bindings.get(attrs.data.path[0]):undefined;
+  if(pivotTable?.pivot){
+   if(n.children.length)err(n,'Table cannot have children');
+   for(const key of Object.keys(attrs))if(!['data','spec',...Object.keys(commonAttributes)].includes(key))err(attrs[key],'Unknown Pivot Table attribute '+key);
+   attributeType('data',pivotTable.type);
+   const bound=presentationBound('data',pivotTable);
+   if(bound)throw bound;
+   if(pivotTable.pivot.max_columns>MAX_PIVOT_TABLE_COLUMNS)err(attrs.data,'Pivot Table allows at most '+MAX_PIVOT_TABLE_COLUMNS+' data columns; set max_columns accordingly',{code:'presentation-bound'});
+   const fields=pivotTable.type.inner!.fields!;
+   const spec=attrs.spec?figureSpec(attrs.spec,fields,n,env):{};
+   for(const key of Object.keys(spec))if(!['title','allow_no_data'].includes(key))err(attrs.spec,'Pivot Table supports title and allow_no_data; its columns come from pivot');
+   if(spec.title!==undefined&&typeof spec.title!=='string')err(attrs.spec,'Table title requires static text');
+   if(spec.allow_no_data!==undefined&&typeof spec.allow_no_data!=='boolean')err(attrs.spec,'Table allow_no_data requires Bool');
+   n.checkedSpec=spec;
+   return {kind:'figure'};
+  }
   if(p.host?.components.includes(n.name)){
    if(n.children.length)err(n,'Figure component cannot have children');
    const binding=(key:string)=>{const ref=attrs[key];if(ref?.k!=='ref'||ref.path.length!==1)err(ref??n,key+' requires a Table declaration reference');const b=p.bindings.get(ref.path[0]);if(!b&&failed.has(ref.path[0]))throw new UpstreamTypeUnavailable();if((b?.type.kind!=='table'&&!(key==='data'&&n.name==='LineChart'&&b?.type.kind==='pivot'))||b.type.inner?.kind!=='schema')err(ref,key+' requires Table(Schema) or a LineChart pivot');attributeType(key,b!.type);return b!;};
@@ -988,10 +1019,46 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    const pivot=intent.steps.find(s=>s.kind==='pivot');
    if(pivot?.kind==='pivot'){
     const wanted=pivot.options,actual=shape.pivot;
-    if(!actual||Object.entries(wanted).some(([key,value])=>actual[key as keyof typeof actual]!==value)||shape.maxRows!==wanted.max_rows)err(d,'Model result does not match the authored pivot contract');
+    if(!actual||Object.entries(wanted).some(([key,value])=>actual[key as keyof typeof actual]!==value)||(actual.rank_columns??undefined)!==wanted.rank_columns||shape.maxRows!==wanted.max_rows)err(d,'Model result does not match the authored pivot contract');
     for(const axis of [wanted.index,wanted.columns]){
      const t=shape.element.fields?.[axis];
      if(!t||t.kind==='option')err(d,'pivot axes require nonnullable projected fields');
+    }
+    const key=projection.value.fields[wanted.columns];
+    const domain=shape.element.fields?.[wanted.columns]?.codec?.variants?.length;
+    function filterBound(expr:QueryExprType):number|undefined{
+     if(expr.kind==='call'&&expr.name==='unwrap_or'){
+      const [condition,fallback]=expr.args;
+      if(fallback?.kind==='literal'&&fallback.value===false)return filterBound(condition);
+     }
+     if(key?.kind!=='member')return;
+     const sameKey=(candidate:QueryExprType)=>candidate.kind==='member'&&candidate.node===key.node&&candidate.member.id===key.member.id;
+     const parameter=(candidate:QueryExprType)=>candidate.kind==='literal'||candidate.kind==='parameter';
+     if(expr.kind==='mapped_comparison'&&expr.op==='Eq'&&expr.node===key.node&&expr.member.id===key.member.id)return 1;
+     if(expr.kind!=='binary')return;
+     if(expr.op==='=='&&(sameKey(expr.left)&&parameter(expr.right)||sameKey(expr.right)&&parameter(expr.left)))return 1;
+     if(expr.op!=='&&'&&expr.op!=='||')return;
+     const left=filterBound(expr.left),right=filterBound(expr.right);
+     if(expr.op==='&&')return Math.min(left??Infinity,right??Infinity);
+     if(left!==undefined&&right!==undefined)return left+right;
+    }
+    if(wanted.rank_columns){
+     const metric=shape.element.fields![wanted.values];
+     if(!numeric(metric)||present(metric).codec?.operations&&!present(metric).codec!.operations!.includes('Sum')){
+      err(d.value.steps.at(-1)!,'Pivot rank_columns requires an additive numeric metric');
+     }
+    }
+    const proven=Math.min(wanted.rank_columns?wanted.max_columns:Infinity,domain??Infinity,...intent.steps.flatMap(step=>step.kind==='filter'?[filterBound(step.predicate)??Infinity]:[]));
+    if(proven>wanted.max_columns){
+     const options=d.value.steps.at(-1)?.args[0];
+     const budget=options?.fields?.find((field:Node)=>field.name==='max_columns')?.value;
+     err(budget??d,Number.isFinite(proven)
+      ?'Pivot column bound '+proven+' exceeds max_columns ('+wanted.max_columns+')'
+      :'Pivot requires a proven column bound within max_columns ('+wanted.max_columns+')',{
+       code:'pivot-column-bound',
+       reason:'列键 '+wanted.columns+' 的上界必须在检查时证明',
+       suggestion:'按题意筛选有业务依据的类别子集。若题意要求展示全部类别，可拆成多组各自有界的图表。'
+      });
     }
    }else if(shape.pivot)err(d,'Model returned an unexpected pivot contract');
    const take=intent.steps.find(s=>s.kind==='take'||s.kind==='take_opt');

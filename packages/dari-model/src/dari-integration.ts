@@ -23,7 +23,7 @@ export async function createIntegration(options:{model?:string;database?:string}
   const query=bridge.bind(plan,parameters);
   if(query.pivot){
    const {index,columns,values,max_rows,max_columns}=query.pivot;
-   const packed=db.prepare(sqlitePivotSql(query.sql,{index,columns,values,maxRows:max_rows,maxColumns:max_columns})).all(...query.bindings);
+   const packed=db.prepare(sqlitePivotSql(query.sql,{index,columns,values,maxRows:max_rows,maxColumns:max_columns,rankColumns:query.pivot.rank_columns})).all(...query.bindings);
    const axes=packed[0];
    if(Number(axes.row_count)>max_rows)throw Error('Pivot index exceeds max_rows ('+max_rows+')');
    if(Number(axes.column_count)>max_columns)throw Error('Pivot columns exceed max_columns ('+max_columns+')');

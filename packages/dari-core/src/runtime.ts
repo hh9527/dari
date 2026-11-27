@@ -1,3 +1,4 @@
+import {csvCells} from './csv.ts';
 import {registerSqliteRegexp} from './database.ts';
 function readProjection(row:any,path:readonly string[]):any {
  let value=row;
@@ -365,6 +366,24 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
   const attrs=Object.fromEntries(n.attrs.map((a:Node)=>[a.name,a.value]));
   return presented(expressionType(attrs.ref),value(attrs.ref),n.checkedPrecision,resolvedTimeFormat(n.checkedTimeFormat));
  }
+ function pivotCell(value:unknown):unknown{
+  if(!value||typeof value!=='object'||!('tag' in value))return value;
+  if(value.tag==='Some'&&'value' in value)return value.value;
+  if(value.tag==='None')return null;
+  return value;
+ }
+ function pivotLabels(rows:SqlRow[],column:string,index:string):Map<string,string>{
+  const labels=new Map<string,string>(),used=new Set([index]);
+  for(const row of rows){
+   const key=JSON.stringify(row[column]);
+   if(labels.has(key))continue;
+   const label=display(row[column]);
+   let unique=label;
+   for(let suffix=2;used.has(unique);suffix++)unique=label+' ('+suffix+')';
+   labels.set(key,unique);used.add(unique);
+  }
+  return labels;
+ }
  function renderChart(n:Node):import('./host.ts').FigureOutput {
   const a=Object.fromEntries(n.attrs.map((f:Node)=>[f.name,f.value]));const ref=(key:string)=>a[key].path[0];
   for(const key of ['data','nodes'])if(a[key]){const b=p.bindings.get(ref(key));if(b?.result?.maxRows===undefined||b.result.maxRows>MAX_PRESENTATION_ROWS||(!b.pivot&&binding(ref(key)).length>MAX_PRESENTATION_ROWS))throw Error('Presentation requires a proven and actual bound <= '+MAX_PRESENTATION_ROWS);}
@@ -377,10 +396,60 @@ export function resolve(p:Program,db:DatabasePort,inputs:Record<string,unknown>=
    return {...figure,content:summary+'\n\n'+figure.content,
     html:'<p>'+html(summary)+'</p>'+(figure.html??''),dataText:summary+'\n\n'+(figure.dataText??figure.content)};
   };
+  const input=p.bindings.get(ref('data'))!;
+  const pivot=input.pivot;
+  if(pivot&&n.name==='Table'){
+   const {index,columns,values}=pivot;
+   const rows:SqlRow[]=binding(ref('data'));
+   const spec=presentationSpec(n);
+   if(!rows.length&&!spec.allow_no_data)throw Error('Table has no data; set allow_no_data:True when an empty result is acceptable');
+   const fields=input.result!.element.fields!;
+   const keys=pivotLabels(rows,columns,index);
+   const byIndex=new Map<string,{axis:unknown;cells:Map<string,unknown>}>();
+   for(const row of rows){
+    const key=JSON.stringify(row[index]);
+    let item=byIndex.get(key);
+    if(!item){
+     item={axis:row[index],cells:new Map()};
+     byIndex.set(key,item);
+    }
+    item.cells.set(JSON.stringify(row[columns]),row[values]);
+   }
+   const dataKeys=[...keys.keys()];
+   const headers=[index,...keys.values()];
+   const displayRows=[...byIndex.values()].map(({axis,cells})=>[
+    presented(fields[index],axis),
+    ...dataKeys.map(key=>presented(fields[values],cells.get(key)))
+   ]);
+   const policy=(fields[values].kind==='option'?fields[values].inner:fields[values])?.presentation;
+   const csvRows=[...byIndex.values()].map(({axis,cells})=>[
+    presented(fields[index],axis),
+    ...dataKeys.map(key=>{
+     const v=pivotCell(cells.get(key));
+     return policy&&typeof v==='number'?Number((v*policy.multiplier).toPrecision(12)):v;
+    })
+   ]);
+   const csvHeaders=policy?.suffix?[index,...[...keys.values()].map(label=>label+' ('+policy.suffix+')')]:headers;
+   const markdownRow=(row:unknown[])=>'| '+row.map(value=>value==null?'':md(value)).join(' | ')+' |';
+   const content=[markdownRow(headers),markdownRow(headers.map(()=> '---')),...displayRows.map(markdownRow)].join('\n');
+   const tableHtml='<table><thead><tr>'+headers.map(header=>'<th>'+html(header)+'</th>').join('')+'</tr></thead><tbody>'+
+    displayRows.map(row=>'<tr>'+row.map(value=>'<td>'+ (value==null?'':html(value))+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
+   const csv=csvCells([csvHeaders,...csvRows]);
+   const fence='`'.repeat(Math.max(3,...(csv.match(/`+/g)??[]).map(run=>run.length+1)));
+   return {kind:'table',content,html:tableHtml,title:spec.title,dataText:fence+'csv\n'+csv+'\n'+fence};
+  }
   if(n.checkedSpec&&p.host){
    const rows=(name:string)=>binding(name).map((row:any)=>Object.fromEntries(Object.entries(row).map(([k,v]:[string,any])=>[k,v&&typeof v==='object'&&typeof v.tag==='string'?display(v):v])));
    // Resolve inputs outside the rendering catch: an upstream failure keeps its own location.
    const data=rows(ref('data')).map((row:any)=>({...row,...Object.fromEntries((n.checkedPaths??[]).map((path:string[])=>[path.join('.'),readProjection(row,path)]))})),nodes=a.nodes?rows(ref('nodes')):undefined;
+   if(pivot){
+    const raw:SqlRow[]=binding(ref('data'));
+    const labels=pivotLabels(raw,pivot.columns,pivot.index);
+    for(const [i,row] of data.entries()){
+     row[pivot.columns]=labels.get(JSON.stringify(raw[i][pivot.columns]));
+     row[pivot.values]=pivotCell(raw[i][pivot.values]);
+    }
+   }
    try{return withTotal(p.host.renderFigure(n.name,presentationSpec(n),data,n.checkedFields,nodes),data.length);}
    catch(error){
     const asset=[...p.bindings].filter(([,b])=>b.kind==='tree'&&b.ast.root.at<=n.at).sort((a,b)=>b[1].ast.root.at-a[1].ast.root.at)[0]?.[0];

@@ -62,3 +62,13 @@ test('SQLite pivot suppresses data if coordinates repeat', () => {
     const rows = query([[0, 0, 1], [0, 0, 2]], statement);
     assert.deepEqual(rows.map(r => [r.cells, r.duplicate_coordinates]), [[null, 1]]);
 });
+
+test('ranked pivot selects one key set for the entire window and breaks ties by key', () => {
+    const statement = sqlitePivotSql('SELECT hour, device, rate FROM samples', {
+        index: 'hour', columns: 'device', values: 'rate',
+        maxRows: 48, maxColumns: 2, rankColumns: 'SumDescKeyAsc',
+    });
+    const rows = query([[0, 9, 8], [1, 9, 8], [0, 1, 10], [1, 2, 10], [1, 4, 0]], statement);
+    assert.equal(rows[0].column_count, 2);
+    assert.deepEqual(rows.map(r=>JSON.parse(r.cells)), [[[1,10],[9,8]],[[9,8]]]);
+});

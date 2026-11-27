@@ -3,6 +3,7 @@ import type {Node} from './syntax.ts';
 
 export const MAX_RESULT_ROWS=500;
 export const MAX_PRESENTATION_ROWS=110;
+export const MAX_PIVOT_TABLE_COLUMNS=12;
 export type Ordering={key:string;direction:'asc'|'desc'};
 export type ResultContract={element:Type;container:'table'|'option'|'grouped';maxRows?:number;ordering:Ordering[]};
 export type Plan={

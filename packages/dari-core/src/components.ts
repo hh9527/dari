@@ -15,12 +15,12 @@ export const builtinComponents:Record<string,ComponentContract>={
  br:{description:'换行',children:false,attributes:{}},hr:{description:'分隔线',children:false,attributes:{}},
  Lit:{description:'显式确认的固定文案，可包含静态数字',children:false,attributes:{value:attribute('String','静态文案；查询结果使用 UseValue 引用',true)}},
  UseValue:{description:'展示已准备好的标量引用，保留数据来源',children:false,attributes:{ref:attribute('Scalar | Option(Scalar)','直接引用 data、局部值或其字段；计算和默认值处理在前序完成',true),precision:attribute('Int','展示的小数位数'),format:attribute('TimeFormat','与被引用值类型匹配的时间展示格式')}},
- Table:{description:'展示有明确行数上界的表格',children:false,attributes:{data:attribute('Table(Schema)','表数据引用；已证明的行数上界不超过 110',true),spec:attribute('Schema','表格配置：columns、labels、title、precision、allow_no_data、formats')}},
+ Table:{description:'展示有明确行数上界的表格',children:false,attributes:{data:attribute('Table(Schema) | Pivot(Index, Key, Value)','表数据引用；已证明的行数上界不超过 110',true),spec:attribute('Schema','表格配置：columns、labels、title、precision、allow_no_data、formats')}},
  ColumnChart:{description:'柱图',children:false,attributes:{data:attribute('Table(Schema)','有界表数据引用',true),x:attribute('Projection','横轴字段选择器，如 $.name',true),value:attribute('Projection','数值字段选择器，如 $.value',true)}},
  UseReport:{description:'引用独立报告，链接名使用报告的 title',children:false,attributes:{ref:attribute('Report','已声明的 report 引用',true)}}
 };
 export function componentContract(name:string,host?:HostPort):ComponentContract|undefined{
- if(host?.components.includes(name))return host.componentContracts?.[name]??{
+ if(host?.components.includes(name))return (name==='Table'?builtinComponents.Table:host.componentContracts?.[name])??{
   description:'宿主提供的 '+name+' 图表组件；具体 spec 由宿主校验',children:false,attributes:{
    data:attribute('Table(Schema)','图表输入表引用；已证明的行数上界不超过 110',true),
    nodes:attribute('Table(Schema)','可选节点数据引用；已证明的行数上界不超过 110'),

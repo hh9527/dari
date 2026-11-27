@@ -1,13 +1,9 @@
 import type {Row} from './shared.ts';
 
-/** CSV preserves column order; empty strings are quoted, missing values are empty cells. */
+import {csvCells} from '@local/dari-core';
+
 export function csv(rows:Row[],columns=[...new Set(rows.flatMap(row=>Object.keys(row)))]):string {
-  const cell=(value:unknown):string=>{
-    if(value===null||value===undefined)return '';
-    const text=typeof value==='object'?JSON.stringify(value):String(value);
-    return text===''||/[",\r\n]/.test(text)?'"'+text.replaceAll('"','""')+'"':text;
-  };
-  return [columns.map(cell).join(','),...rows.map(row=>columns.map(key=>cell(row[key])).join(','))].join('\n');
+  return csvCells([columns,...rows.map(row=>columns.map(key=>row[key]))]);
 }
 
 /** Non-rendering chart inputs for reading Answer figures; no provenance or source code. */
