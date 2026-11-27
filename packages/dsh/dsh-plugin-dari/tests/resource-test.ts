@@ -27,8 +27,8 @@ try {
  symlinkSync(local,join(root,'alias.dari'));assert.equal(readDariSource(root,'alias.dari','test').file,'reports/a.dari');
  writeFileSync(join(outside,'escape.dari'),'data a = 1;');symlinkSync(outside,join(root,'escape'));
  for(const path of [join(outside,'escape.dari'),'../escape.dari','escape/escape.dari','.work/a.dari'])assert.throws(()=>readDariSource(root,path,'test'));
- await assert.rejects(call('dari_check',{src:'reports/a.dari',answer:'a'}),/Only src/);
- await assert.rejects(call('dari_check',{src:'reports/a.dari'}),/dataFile/);
- await assert.rejects(call('dari_submit',{answer:false,src:'reports/a.dari',data:['a'],refresh:true}),/Only src/);
+ await assert.rejects(call('dari_check',{src_path:'reports/a.dari',answer:'a'}),/Only src_path/);
+ await assert.rejects(call('dari_check',{src_path:'reports/a.dari'}),/dataFile/);
+ await assert.rejects(call('dari_submit',{answer:false,src_path:'reports/a.dari',data:['a'],refresh:true}),/Only src_path/);
  console.log('Public tools: exact ten-tool surface, built-in manuals, local file boundaries, canonical cache identity and rejected retired parameters passed');
 } finally {definitions.dispose();rmSync(root,{recursive:true,force:true});rmSync(outside,{recursive:true,force:true});}

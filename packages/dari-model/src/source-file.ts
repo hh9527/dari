@@ -18,7 +18,7 @@ function checkRealBoundary(root: string, target: string): void {
  */
 export function readDariSource(root:string, raw:unknown, tool:string): {file:string;text:string} {
   if(typeof raw!=='string'||!raw.trim()||raw.includes('://')||raw.includes('\0')||!raw.endsWith('.dari')) {
-    throw new Error(`${tool}: src must be a local .dari file path, relative to the workspace or absolute`);
+    throw new Error(`${tool}: src_path must be a local .dari file path, relative to the workspace or absolute. Save the analysis to a file and pass { "src_path": "/path/of/source.dari" }`);
   }
   const target=resolve(root,raw);
   const inside=relative(resolve(root),target);

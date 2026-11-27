@@ -45,14 +45,16 @@ export function createDariTools(options:{config:PluginConfig['dari'];knowledge:K
   if(!context){const epochMillis=Date.now(),zone=options.timeContext.zones.get(session);context={epochMillis,now:new Date(epochMillis).toISOString(),timeZone:zone?.kind==='resolved'?zone.timeZone:null};if(contexts.size>=128)contexts.delete(contexts.keys().next().value!);contexts.set(key,context);}
   return {entry,key,context,host:worker(entry.settings.dataFile,entry.settings.model)};
  }
+ const pathUsage='Pass the path of an existing .dari file inside the workspace in src_path. Relative and absolute paths are accepted. Example: { "src_path": "/path/of/source.dari" }.';
+ const pathParameters={type:'object' as const,properties:{src_path:{type:'string' as const,description:pathUsage}},required:['src_path'],additionalProperties:false};
  const tools:ToolDefinition[]=[...(['check','resolve'] as const).map(method=>({
-  name:'dari_'+(method==='resolve'?'submit':method),description:method==='check'?'Check the complete .dari file without reading business rows. Uses external model type proof for query_remote! and internal proof for query!/tree!. Accepts only src.':'Check and execute a .dari file, publish its artifacts and deliver the unique Answer as a visible conversation message. Accepts only src. Do not repeat the delivered Answer. The tool receipt includes displayed chart/table/value data for analysis. If delivery is unavailable, forward the returned Answer verbatim; add observations separately.',
-  parameters:{type:'object',properties:{src:{type:'string'}},required:['src'],additionalProperties:false},output,
-  async execute(args:{src:string},exec:ToolExec){
-   if(Object.keys(args).some(k=>k!=='src'))throw Error('Only src is accepted');
+  name:'dari_'+(method==='resolve'?'submit':method),description:pathUsage+' '+(method==='check'?'Check the complete .dari file without reading business rows. Uses external model type proof for query_remote! and internal proof for query!/tree!.':'Check and execute a .dari file, publish its artifacts and deliver the unique Answer as a visible conversation message. Do not repeat the delivered Answer. The tool receipt includes displayed chart/table/value data for analysis. If delivery is unavailable, forward the returned Answer verbatim; add observations separately.'),
+  parameters:pathParameters,output,
+  async execute(args:{src_path:string},exec:ToolExec){
+   if(Object.keys(args).some(k=>k!=='src_path'))throw Error('Only src_path is accepted');
    const env=environment(exec);
    if(method==='resolve'&&env.entry.settings.requireRunApproval)throw Error('DARI execution is unavailable when requireRunApproval is enabled');
-   const result=await env.host.request({method,source:source(env.entry.root,args.src),context:env.context,contextContractId:'dari-context/v2'});exec.signal?.throwIfAborted();
+   const result=await env.host.request({method,source:source(env.entry.root,args.src_path),context:env.context,contextContractId:'dari-context/v2'});exec.signal?.throwIfAborted();
    if(method==='check')return {text:'Succeed\n-------\n'+result.types.map((t:any)=>'- '+t.name+': '+t.type).join('\n')+(result.warnings?'\n\n'+result.warnings:'')};
    if(typeof result.dataDocument!=='string'||typeof result.deliveryId!=='string')throw Error('DARI service must provide deliveryId and dataDocument');
    const links=new Map<string,string>(),fileUrls=new Map<string,string>(),artifacts=result.artifacts as Record<string,string>;
@@ -69,8 +71,8 @@ export function createDariTools(options:{config:PluginConfig['dari'];knowledge:K
    return {text:'Succeed\n-------\n- answer message: '+messageId+'\nThe Answer is delivered; do not repeat it. Use the following displayed data for observations; HTML/SVG reading is unnecessary.\n\n'+result.dataDocument};
   }
  })),{
-  name:'dari_renew_context',description:'Start a fresh context time snapshot for this session. Takes src, a local .dari file. Subsequent dari_submit reads current data with the fresh snapshot.',parameters:{type:'object',properties:{src:{type:'string'}},required:['src'],additionalProperties:false},output,
-  async execute(args:{src:string},exec){const env=environment(exec);source(env.entry.root,args.src);contexts.delete(env.key);return {text:'Succeed\n-------\nContext renewed'};}
+  name:'dari_renew_context',description:pathUsage+' Start a fresh context time snapshot for this session. Subsequent dari_submit reads current data with the fresh snapshot.',parameters:pathParameters,output,
+  async execute(args:{src_path:string},exec){const env=environment(exec);source(env.entry.root,args.src_path);contexts.delete(env.key);return {text:'Succeed\n-------\nContext renewed'};}
  }];
  return {tools,async infoContracts(points:any[],exec:ToolExec){
   exec.signal?.throwIfAborted();const entry=options.knowledge.ensureWorkspace(exec);

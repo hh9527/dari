@@ -1,6 +1,8 @@
 # .dari 语言手册
 
-本环境使用 `.dari`，工具为 dari_check({src})、dari_submit({src})、dari_renew_context({src})；用宿主文件工具读写工作区文件。分析顺序见 oks://help/workflow.md，行为约束见 oks://help/rules.md。
+本环境使用 `.dari`，工具为 dari_check({src_path})、dari_submit({src_path})、dari_renew_context({src_path})；用宿主文件工具读写工作区文件。分析顺序见 oks://help/workflow.md，行为约束见 oks://help/rules.md。
+
+先用宿主文件工具保存分析稿，再将工作区内的相对或绝对路径传给工具，例如 `dari_check({ "src_path": "/path/of/source.dari" })`。
 
 ## 声明与类型
 

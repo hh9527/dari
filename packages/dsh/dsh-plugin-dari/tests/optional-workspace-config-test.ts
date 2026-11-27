@@ -34,7 +34,7 @@ try {
   writeFileSync(join(root,'dari.json'),JSON.stringify({model:'updated.wasm'}));
   assert.equal((await tools.infoContracts!([],exec(root)) as any).model,join(root,'updated.wasm'));
   writeFileSync(join(root,'analysis.dari'),'answer tree! {Answer []};');
-  assert.match((await (tools.find(t=>t.name==='dari_check')! as any).execute({src:'analysis.dari'},exec(root)) as any).text,/Succeed/);
+  assert.match((await (tools.find(t=>t.name==='dari_check')! as any).execute({src_path:'analysis.dari'},exec(root)) as any).text,/Succeed/);
  }finally{tools.dispose();}
  console.log('Optional workspace configuration: profile fallback, overrides, errors, VA preflight and shared DARI model passed');
 }finally{rmSync(root,{recursive:true,force:true});}
