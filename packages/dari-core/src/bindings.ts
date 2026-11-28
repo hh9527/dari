@@ -6,7 +6,7 @@ import type {Diagnostic} from './diagnostics.ts';
 type Scope=Map<string,Node>;
 type Relation={
  kind:'relation';language:'query'|'select';bindings:Node[];start:Node;steps:Node[];
- editorBindings?:Node[];scope:Scope;orderingScope?:Scope;row:Node;projected:boolean;key:object;
+ branches?:Node[];editorBindings?:Node[];scope:Scope;orderingScope?:Scope;row:Node;projected:boolean;key:object;
 };
 type Local=Relation|{kind:'value';name:string};
 const ref=(name:string,at:number):Node=>({k:'ref',path:[name],at});
@@ -75,7 +75,7 @@ export function lowerPlanBindings(declaration:Node,fresh:()=>string,globals:Read
  function emit(value:Node,label:string):string{
   const name=fresh();definitions.push({k:'internal_plan',name,value,at:value.at,internal:true,owner:declaration.owner??declaration.name,label});return name;
  }
- function ast(r:Relation):Node{return {k:r.language,bindings:r.bindings,start:r.start,steps:r.steps,editorBindings:r.editorBindings,at:block.at,end:block.end,loweredBindings:true};}
+ function ast(r:Relation):Node{return {k:r.language,bindings:r.bindings,start:r.start,branches:r.branches,steps:r.steps,editorBindings:r.editorBindings,at:block.at,end:block.end,loweredBindings:true};}
  function materialize(r:Relation,label:string):string{
   const previous=materialized.get(r.key);if(previous)return previous;
   const name=emit(ast(r),label);materialized.set(r.key,name);return name;
@@ -148,6 +148,11 @@ export function lowerPlanBindings(declaration:Node,fresh:()=>string,globals:Read
    const scope=new Map<string,Node>(),bindings=inputs.flatMap(r=>r.bindings);
    inputs.forEach(r=>{for(const [key,value]of r.scope)scope.set(key,value);});
    return {kind:'relation',language:'query',bindings,start:call('pair',inputs.map(r=>r.row),n.at),steps:[],scope,row:inputs[0].row,projected:false,key:{}};
+  }
+  if(n.name==='union_all'&&inputs.every(r=>r.language==='query'&&r.projected&&!r.steps.some(step=>['take','top','take_opt','pivot'].includes(step.name)))){
+   const branches=inputs.flatMap(r=>r.branches&&r.steps.length===0?r.branches:[{...ast(r),at:r.steps.at(-1)!.at,end:r.steps.at(-1)!.end}]);
+   return {kind:'relation',language:'query',bindings:[],start:n,branches,steps:[],
+    scope:new Map(),row:ref('out',n.at),projected:true,key:{}};
   }
   if(block.k==='query'&&inputs.some(r=>r.language==='query'&&!r.projected))fail(n,'Model nodes join through an explicit published Relation using connect; query results join in query!');
   const scope=new Map<string,Node>(),bindings:Node[]=[],members:Node[]=[];

@@ -42,7 +42,7 @@ export type QueryOperation =
     {kind:'take';count:number} |
     {kind:'take_opt'};
 // This is the dependent query type passed to the model's semantic checker.
-export type IntentType = {kind:'query';nodes:NodeType[];root:number;pair?:{left:number;right:number};steps:(QueryOperation&{id:string})[]};
+export type IntentType = {kind:'query';nodes:NodeType[];root:number;branches?:IntentType[];pair?:{left:number;right:number};steps:(QueryOperation&{id:string})[]};
 export type ProofReceipt={contractId:string;inputDigest:string;consumedStepIds:string[]};
 export type ModelShape = {element:Type;container:'table'|'option';maxRows?:number;pivot?:PivotOptions};
 export type CheckedIntent = ModelShape & {plan:unknown;receipt:ProofReceipt;hasTotal?:boolean};
@@ -75,51 +75,58 @@ export function storage(t:Type):{type:string;nullable:boolean}{
 export function encodeIntent(intent:IntentType,sourceOf:(value:object)=>SourceEvidence|undefined=()=>undefined){
     const evidence=new WeakMap<object,SourceEvidence>();
     function mark<T extends object>(wire:T,source:object):T{const entry=sourceOf(source);if(entry)evidence.set(wire,entry);return wire;}
-    function expression(e:QueryExprType):unknown{return mark(expressionValue(e) as object,e);}
     const constants=new Map<number,unknown>(),parameterTypes=new Map<number,Type>();
     let next=0;
     function scan(e:QueryExprType){if(e.kind==='calendar_bucket')scan(e.timeZone);if(e.kind==='parameter')next=Math.max(next,e.index+1);if(e.kind==='binary'){scan(e.left);scan(e.right);}if(e.kind==='unary')scan(e.value);if(e.kind==='record')Object.values(e.fields).forEach(scan);if(e.kind==='call')e.args.forEach(scan);}
-    for(const s of intent.steps){if(s.kind==='filter')scan(s.predicate);if(s.kind==='project')scan(s.value);if(s.kind==='order_by')s.terms.forEach(t=>scan(t.value));}
-    function expressionValue(e:QueryExprType):unknown{
-        switch(e.kind){
-            case 'member':return {kind:e.kind,node:intent.nodes[e.node].id,member:e.member.symbol};
-            case 'subnet':return {kind:e.kind,value:expression(e.value),cidr:e.cidr,negate:e.negate};
-            case 'mapped_comparison':return {kind:e.kind,value:expression({kind:'member',node:e.node,member:e.member}),logical:e.logical,member:e.value,op:e.op};
-            case 'calendar_bucket':return {kind:e.kind,value:expression({kind:e.conversion?'to_datetime_utc':'member',node:e.node,member:e.member}),unit:e.unit,timeZone:expression(e.timeZone)};
-            case 'to_datetime_utc':return {kind:e.kind,value:expression({kind:'member',node:e.node,member:e.member})};
-            case 'utc_bucket':return {kind:e.kind,value:expression({kind:e.conversion?'to_datetime_utc':'member',node:e.node,member:e.member}),unit:e.unit};
-            case 'output':return {kind:e.kind,name:e.name};
-            case 'record':return {kind:e.kind,fields:Object.entries(e.fields).map(([name,value])=>{const field={name,value:expression(value)},span=sourceOf(e)?.fields?.[name];if(span)evidence.set(field,{span,fields:{name:span}});return field;})};
-            case 'call':return {kind:e.kind,name:e.name,args:e.args.map(expression)};
-            case 'binary':return {kind:e.kind,op:e.op,left:expression(e.left),right:expression(e.right)};
-            case 'unary':return {kind:e.kind,op:e.op,value:expression(e.value)};
-            case 'literal':case 'parameter':{
-                const index=e.kind==='literal'?next++:e.index;
-                if(e.kind==='literal')constants.set(index,e.value);
-                parameterTypes.set(index,e.type);
-                const base=e.type.kind==='option'?e.type.inner!:e.type;
-                const logical=base.modelLogical??(base.kind==='nominal'||base.name==='TimeZone'?base.name:undefined);
-                return {kind:'parameter',index,input_type:storage(e.type).type,nullable:e.type.kind==='option',...(logical?{logical}:{})};
-            }
-            default:throw Error('Unsupported intent expression '+(e as {kind:string}).kind);
-        }
+    function scanIntent(intent:IntentType){
+        intent.branches?.forEach(scanIntent);
+        for(const s of intent.steps){if(s.kind==='filter')scan(s.predicate);if(s.kind==='project')scan(s.value);if(s.kind==='order_by')s.terms.forEach(t=>scan(t.value));}
     }
-    const wire=mark({root:intent.nodes[intent.root].id,...(intent.pair?{pair:{left:intent.nodes[intent.pair.left].id,right:intent.nodes[intent.pair.right].id}}:{}),nodes:intent.nodes.map(n=>mark({id:n.id,dataset:n.dataset.symbol},n)),steps:intent.steps.map(step=>{
-        let body:unknown;
-        switch(step.kind){
-            case 'connect':body={relation:step.relation.symbol,from:intent.nodes[step.from].id,to:intent.nodes[step.to].id};break;
-            case 'filter':body=expression(step.predicate);break;
-            case 'project':body=expression(step.value);break;
-            case 'order_by':body={terms:step.terms.map(t=>({direction:t.direction,value:expression(t.value)}))};break;
-            case 'group_by_identity':body={node:intent.nodes[step.node].id};break;
-            case 'take':body={count:step.count};break;
-            case 'take_opt':body={};break;
-            case 'pivot':body=step.options;break;
-            default:throw Error('Unsupported model operation '+(step as {kind:string}).kind);
+    scanIntent(intent);
+    function encode(intent:IntentType){
+        function expression(e:QueryExprType):unknown{return mark(expressionValue(e) as object,e);}
+        function expressionValue(e:QueryExprType):unknown{
+            switch(e.kind){
+                case 'member':return {kind:e.kind,node:intent.nodes[e.node].id,member:e.member.symbol};
+                case 'subnet':return {kind:e.kind,value:expression(e.value),cidr:e.cidr,negate:e.negate};
+                case 'mapped_comparison':return {kind:e.kind,value:expression({kind:'member',node:e.node,member:e.member}),logical:e.logical,member:e.value,op:e.op};
+                case 'calendar_bucket':return {kind:e.kind,value:expression({kind:e.conversion?'to_datetime_utc':'member',node:e.node,member:e.member}),unit:e.unit,timeZone:expression(e.timeZone)};
+                case 'to_datetime_utc':return {kind:e.kind,value:expression({kind:'member',node:e.node,member:e.member})};
+                case 'utc_bucket':return {kind:e.kind,value:expression({kind:e.conversion?'to_datetime_utc':'member',node:e.node,member:e.member}),unit:e.unit};
+                case 'output':return {kind:e.kind,name:e.name};
+                case 'record':return {kind:e.kind,fields:Object.entries(e.fields).map(([name,value])=>{const field={name,value:expression(value)},span=sourceOf(e)?.fields?.[name];if(span)evidence.set(field,{span,fields:{name:span}});return field;})};
+                case 'call':return {kind:e.kind,name:e.name,args:e.args.map(expression)};
+                case 'binary':return {kind:e.kind,op:e.op,left:expression(e.left),right:expression(e.right)};
+                case 'unary':return {kind:e.kind,op:e.op,value:expression(e.value)};
+                case 'literal':case 'parameter':{
+                    const index=e.kind==='literal'?next++:e.index;
+                    if(e.kind==='literal')constants.set(index,e.value);
+                    parameterTypes.set(index,e.type);
+                    const base=e.type.kind==='option'?e.type.inner!:e.type;
+                    const logical=base.modelLogical??(base.kind==='nominal'||base.name==='TimeZone'?base.name:undefined);
+                    return {kind:'parameter',index,input_type:storage(e.type).type,nullable:e.type.kind==='option',...(logical?{logical}:{})};
+                }
+                default:throw Error('Unsupported intent expression '+(e as {kind:string}).kind);
+            }
         }
-        if(body&&typeof body==='object'&&!evidence.has(body))mark(body,step);
-        return mark({id:step.id,kind:step.kind,body},step);
-    })},intent);
+        return mark({root:intent.nodes[intent.root]?.id??'',...(intent.branches?{branches:intent.branches.map(encode)}:{}),...(intent.pair?{pair:{left:intent.nodes[intent.pair.left].id,right:intent.nodes[intent.pair.right].id}}:{}),nodes:intent.nodes.map(n=>mark({id:n.id,dataset:n.dataset.symbol},n)),steps:intent.steps.map(step=>{
+            let body:unknown;
+            switch(step.kind){
+                case 'connect':body={relation:step.relation.symbol,from:intent.nodes[step.from].id,to:intent.nodes[step.to].id};break;
+                case 'filter':body=expression(step.predicate);break;
+                case 'project':body=expression(step.value);break;
+                case 'order_by':body={terms:step.terms.map(t=>({direction:t.direction,value:expression(t.value)}))};break;
+                case 'group_by_identity':body={node:intent.nodes[step.node].id};break;
+                case 'take':body={count:step.count};break;
+                case 'take_opt':body={};break;
+                case 'pivot':body=step.options;break;
+                default:throw Error('Unsupported model operation '+(step as {kind:string}).kind);
+            }
+            if(body&&typeof body==='object'&&!evidence.has(body))mark(body,step);
+            return mark({id:step.id,kind:step.kind,body},step);
+        })},intent);
+    }
+    const wire=encode(intent);
     const origins:InputOrigin[]=[];
     function collect(value:unknown,path:(string|number)[],parent?:SourceEvidence['span']){
         const entry=value&&typeof value==='object'?evidence.get(value):undefined,span=entry?.span??parent;

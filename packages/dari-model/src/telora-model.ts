@@ -11,7 +11,7 @@ import {primaryCodecs} from '@local/dari-core/codecs';
 
 type WireMember={id:string;symbol:string;kind:'dimension'|'measure';logical:string;storage:string;nullable:boolean}&Partial<import("../../dari-core/src/model.ts").MemberCapabilities>;
 type WireDataset={id:string;symbol:string;members:WireMember[]};
-type WireTemplate={pivot?:import('../../dari-core/src/model.ts').PivotOptions|null;container:'table'|'option';receipt:ProofReceipt;sql:string;total_sql?:string|null;bindings:any[];columns:(ResultColumn&{logical:string})[];max_rows:number|null};
+type WireTemplate={union_branches?:Pick<WireTemplate,'sql'|'bindings'>[];pivot?:import('../../dari-core/src/model.ts').PivotOptions|null;container:'table'|'option';receipt:ProofReceipt;sql:string;total_sql?:string|null;bindings:any[];columns:(ResultColumn&{logical:string})[];max_rows:number|null};
 export async function openModel(artifact:string){
     accessSync(artifact);
     const buffer=new SharedArrayBuffer(8+8*1024*1024),state=new Int32Array(buffer,0,2),bytes=new Uint8Array(buffer,8);
@@ -102,16 +102,19 @@ export async function openModel(artifact:string){
             // Scan SQL tokens: placeholders in quoted text/comments are not bindings.
             const template=total?checked.total_sql:checked.sql;
             if(!template)throw Error('Model transform contradicts published total row count capability');
-            const sql=template.replace(/'(?:''|[^'])*'|"(?:""|[^"])*"|--[^\n]*|\/\*[\s\S]*?\*\/|\?(\d+)|:__dari_(\d+)/g,(token,constant,parameter)=>{
+            const bindSql=(template:string, allocated:WireTemplate["bindings"])=>template.replace(/'(?:''|[^'])*'|"(?:""|[^"])*"|--[^\n]*|\/\*[\s\S]*?\*\/|\?(\d+)|:__dari_(\d+)/g,(token,constant,parameter)=>{
                 if(constant===undefined&&parameter===undefined)return token;
                 const index=Number(parameter);
-                const value=constant!==undefined?checked.bindings[Number(constant)-1]:constants.has(index)?constants.get(index):parameters[index];
+                const value=constant!==undefined?allocated[Number(constant)-1]:constants.has(index)?constants.get(index):parameters[index];
                 if(value===undefined)throw Error('Missing model binding');
                 let type=parameterTypes.get(index);
                 if(type?.kind==='option')type=type.inner;
                 const unwrapped=value?.tag==='None'?null:value?.tag==='Some'?value.value:value;
                 bindings.push(parameter!==undefined&&unwrapped!==null&&type?.codec?type.codec.encode(unwrapped):unwrapped);return '?';
             });
+            const sql=checked.union_branches
+                ?template.replace('__dari_union_branches__',()=>checked.union_branches!.map(branch=>bindSql(branch.sql,branch.bindings)).join(' UNION ALL '))
+                :bindSql(template,checked.bindings);
             return {sql,bindings,columns:checked.columns.map(({logical,...column})=>column),max_rows:checked.pivot?.max_rows??checked.max_rows??undefined,pivot:checked.pivot??undefined};
     }
     return {model,bind,stats,contract,codecs,codecModuleSource:contract.codec_module,

@@ -562,6 +562,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
  function checkGrouped(n:Node,inside:boolean,keys:Set<string>){if(n.k==='unary')checkGrouped(n.value,inside,keys);if(n.k==='ref'&&!inside&&!keys.has(n.path.join('.'))&&!keys.has(n.path[0]))err(n,'Ungrouped column '+expressionHint(n),{code:'ungrouped-column',reason:'聚合投影中的普通字段必须是当前输入的分组键；let 绑定的计划不会修改原始输入',suggestion:'若已定义 let g = rows |> group_by({...})，从 g |> project({...}) 继续，并通过 g 引用分组键；否则先按业务口径声明 group_by，或仅投影聚合值'});if(n.k==='call'){const agg=['count','sum','avg','min','max'].includes(n.name);if(inside&&agg)err(n,'Nested aggregates are unsupported');for(const a of n.args)checkGrouped(a,inside||agg,keys);}if(n.k==='binary'){checkGrouped(n.left,inside,keys);checkGrouped(n.right,inside,keys);}}
  function modelQuery(n:Node,parameters:Node[]):IntentType {
   if(!model)err(n,'Remote query proof requires a model integration',{code:'model-unavailable',reason:'当前只完成本地检查，远端结果类型尚未由模型证明',suggestion:'配置实现 ModelCheckPort 的集成模块，再进行完整检查'});
+  const branches:IntentType[]|undefined=n.branches?.map((branch:Node)=>modelQuery(branch,parameters));
   const nodes:IntentType['nodes']=[];
   const aliases=new Map<string,number>();
   for(const binding of n.bindings){
@@ -577,7 +578,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    if(n.start.args.length!==2||n.start.args.some((a:Node)=>a.k!=='ref'||a.path.length!==1||!aliases.has(a.path[0])))err(n.start,'pair requires two bound model nodes');
    pair={left:aliases.get(n.start.args[0].path[0])!,right:aliases.get(n.start.args[1].path[0])!};
    if(pair.left===pair.right)err(n.start,'pair requires two independent model populations');
-  }else if(n.start.k!=='ref'||n.start.path.length!==1||!aliases.has(n.start.path[0]))err(n.start,'Model plan requires a bound model node or a lowered pair input');
+  }else if(!branches&&(n.start.k!=='ref'||n.start.path.length!==1||!aliases.has(n.start.path[0])))err(n.start,'Model plan requires a bound model node or a lowered pair input');
   function expression(value:Node,allowNotNone=false):QueryExprType {const result=expressionValue(value,allowNotNone);modelLocations.set(result,value);return result;}
   function expressionValue(value:Node,allowNotNone=false):QueryExprType {
    // Expressions independent of model rows are evaluated locally and sent as typed parameters.
@@ -728,7 +729,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    }else err(step,'Unsupported model query operation '+step.name);
    for(const added of steps.slice(before))modelLocations.set(added,step);
   }
-  const intent:IntentType={kind:'query',nodes,root:pair?.left??aliases.get(n.start.path[0])!,...(pair?{pair}:{}),steps:steps.map((step,i)=>{const result={...step,id:'step_'+i};const origin=modelLocations.get(step);if(origin)modelLocations.set(result,origin);return result;})};modelLocations.set(intent,n);return intent;
+  const intent:IntentType={kind:'query',nodes,root:branches?0:pair?.left??aliases.get(n.start.path[0])!,...(branches?{branches}:{}),...(pair?{pair}:{}),steps:steps.map((step,i)=>{const result={...step,id:'step_'+i};const origin=modelLocations.get(step);if(origin)modelLocations.set(result,origin);return result;})};modelLocations.set(intent,n);return intent;
  }
  function constant(n:Node|undefined,fields?:Record<string,Type>,path='option'):any{
   if(!n)return err({k:'literal',at:0},'Expected a previously declared static option');
@@ -1038,11 +1039,11 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
    let shape!:CheckedIntent;try{shape=model!.check_type(intent,encoded);}catch(error){throw modelFailure(error,intent,d.value);}
    try{verifyReceipt(shape.receipt,expectedProof);}catch(e){err(d,(e as Error).message);}
    const projection=intent.steps.find(s=>s.kind==='project');
-   if(projection?.kind!=='project'||projection.value.kind!=='record')return err(d,'Model query requires a named record projection');
-   const expectedFields=Object.entries(projection.value.fields);
+   if(!intent.branches&&(projection?.kind!=='project'||projection.value.kind!=='record'))return err(d,'Model query requires a named record projection');
+   const expectedFields=projection?.kind==='project'&&projection.value.kind==='record'?Object.entries(projection.value.fields):[];
    const actualFields=Object.entries(shape.element.fields??{});
    const presence=modelPresence(intent.root,intent.pair,intent.steps,intent.nodes.length);
-   if(shape.element.kind!=='schema'||actualFields.length!==expectedFields.length||expectedFields.some(([name,value],i)=>(()=>{const nonnull=value.kind==='call'&&value.name==='not_none',member=nonnull&&value.kind==='call'?value.args[0]:value;if(member.kind!=='member'&&member.kind!=='utc_bucket'&&member.kind!=='calendar_bucket'&&member.kind!=='to_datetime_utc')return true;const base=member.kind==='utc_bucket'||member.kind==='calendar_bucket'||member.kind==='to_datetime_utc'?(member.member.type.kind==='option'?optional(scalar('DateTimeUtc')):scalar('DateTimeUtc')):member.member.type;const expected=nonnull?present(base):member.member.kind==='dimension'&&presence.get(member.node)?optional(base):base;return actualFields[i]?.[0]!==name||!same(actualFields[i][1],expected);})()))err(d,'Model result Schema does not match the authored projection names, business types and nullability');
+   if(!intent.branches&&(shape.element.kind!=='schema'||actualFields.length!==expectedFields.length||expectedFields.some(([name,value],i)=>(()=>{const nonnull=value.kind==='call'&&value.name==='not_none',member=nonnull&&value.kind==='call'?value.args[0]:value;if(member.kind!=='member'&&member.kind!=='utc_bucket'&&member.kind!=='calendar_bucket'&&member.kind!=='to_datetime_utc')return true;const base=member.kind==='utc_bucket'||member.kind==='calendar_bucket'||member.kind==='to_datetime_utc'?(member.member.type.kind==='option'?optional(scalar('DateTimeUtc')):scalar('DateTimeUtc')):member.member.type;const expected=nonnull?present(base):member.member.kind==='dimension'&&presence.get(member.node)?optional(base):base;return actualFields[i]?.[0]!==name||!same(actualFields[i][1],expected);})())))err(d,'Model result Schema does not match the authored projection names, business types and nullability');
    for(const b of d.value.editorBindings??[]){
     const node=intent.nodes[d.value.bindings.findIndex((v:Node)=>v.name===b.path[0])];
     const type=b.path[0]==='out'?shape.element:node?{kind:'schema',fields:Object.fromEntries(Object.entries(node.dataset.members).map(([key,m])=>[key,m.type]))} as Type:undefined;
@@ -1056,7 +1057,7 @@ function checkProgram(source:string,model?:ModelPort,options:{allowTestSources?:
      const t=shape.element.fields?.[axis];
      if(!t||t.kind==='option')err(d,'pivot axes require nonnullable projected fields');
     }
-    const key=projection.value.fields[wanted.columns];
+    const key=expectedFields.find(([name])=>name===wanted.columns)?.[1];
     const domain=shape.element.fields?.[wanted.columns]?.codec?.variants?.length;
     function filterBound(expr:QueryExprType):number|undefined{
      if(expr.kind==='call'&&expr.name==='unwrap_or'){
