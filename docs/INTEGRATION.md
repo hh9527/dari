@@ -55,3 +55,9 @@ contextType/contextContractId 由集成方在检查时提供，执行请求提�
 LSP 对 `tree!` 的组件名和属性名提供悬停说明，包含用途、类型和必填性；数据引用属性同时显示检查器得到的具体类型。内置组件说明与必填属性校验共享 core 的组件契约。宿主扩展组件可通过 `HostPort.componentContracts` 提供说明；未提供时展示通用的图表 data、nodes、spec 契约，详细配置仍由 `checkFigure` 校验。
 
 内置类型、宿主发布类型、模型类型及其枚举成员统一参与 hover 与补全。Context 是 context! 的选择器命名空间，展示各选择项的返回类型；它不是可构造的值类型。
+
+## PostgreSQL 远端执行
+
+使用支持 PostgreSQL 方言的本体模型。可信集成可传入 `{model, postgresEnv: "DARI_POSTGRES_URL"}`，连接串从指定环境变量读取。DSH 部署 profile 在插件配置的 `dari.postgresEnv` 中指定同一个环境变量。CLI 和 LSP 可通过 `--options` 传入该配置。SQLite 远端使用 `database`，两种连接配置互斥。
+
+`take` 的取数和精确计数共享一个只读 PostgreSQL 快照。本地 `query!` 使用独立的内存 SQLite。可将 `DARI_TEST_POSTGRES` 指向独立的空 PostgreSQL 数据库，运行 `node tests/postgres-integration.ts /path/to/ic.wasm`，用小型夹具和 SQLite 对照执行。

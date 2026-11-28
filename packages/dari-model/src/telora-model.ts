@@ -12,7 +12,7 @@ import {primaryCodecs} from '@local/dari-core/codecs';
 type WireMember={id:string;symbol:string;kind:'dimension'|'measure';logical:string;storage:string;nullable:boolean}&Partial<import("../../dari-core/src/model.ts").MemberCapabilities>;
 type WireDataset={id:string;symbol:string;members:WireMember[]};
 type WireTemplate={union_branches?:Pick<WireTemplate,'sql'|'bindings'>[];pivot?:import('../../dari-core/src/model.ts').PivotOptions|null;container:'table'|'option';receipt:ProofReceipt;sql:string;total_sql?:string|null;bindings:any[];columns:(ResultColumn&{logical:string})[];max_rows:number|null};
-export async function openModel(artifact:string){
+export async function openModel(artifact:string,dialect:'Sqlite'|'Postgres'='Sqlite'){
     accessSync(artifact);
     const buffer=new SharedArrayBuffer(8+8*1024*1024),state=new Int32Array(buffer,0,2),bytes=new Uint8Array(buffer,8);
     const worker=new Worker(new URL('./model-worker.mjs',import.meta.url),{execArgv:[],workerData:{buffer,artifact:pathResolve(artifact)}});
@@ -85,11 +85,11 @@ export async function openModel(artifact:string){
     }
     const model:ModelCheckPort={
         contractId:contract.contract_id,
-        implementationId:createHash('sha256').update(readFileSync(artifact)).digest('hex'),
+        implementationId:createHash('sha256').update(readFileSync(artifact)).update(dialect).digest('hex'),
         datasets,types,relations:Object.fromEntries(contract.relations.map(r=>[r.symbol,{...r,kind:'relation' as const}])),
         check_type(intent:IntentType,encoded:EncodedIntent){
             const start=performance.now();
-            const checked:WireTemplate=request('ontology/model',{method:'transform',input:{intent:encoded.wire}},encoded.origins.map(o=>({...o,path:['input','intent',...o.path]})));
+            const checked:WireTemplate=request('ontology/model',{method:'transform',input:{intent:encoded.wire,dialect}},encoded.origins.map(o=>({...o,path:['input','intent',...o.path]})));
             stats.checkMs.push(performance.now()-start);
             const fields:Record<string,Type>=Object.create(null);
             for(const c of checked.columns){const t=business(c.logical,c.type);fields[c.name]=c.nullable?{kind:'option',inner:t}:t;}
@@ -102,22 +102,30 @@ export async function openModel(artifact:string){
             // Scan SQL tokens: placeholders in quoted text/comments are not bindings.
             const template=total?checked.total_sql:checked.sql;
             if(!template)throw Error('Model transform contradicts published total row count capability');
-            const bindSql=(template:string, allocated:WireTemplate["bindings"])=>template.replace(/'(?:''|[^'])*'|"(?:""|[^"])*"|--[^\n]*|\/\*[\s\S]*?\*\/|\?(\d+)|:__dari_(\d+)/g,(token,constant,parameter)=>{
+            const bindSql=(template:string, allocated:WireTemplate["bindings"])=>{
+                const positions=new Map<string,number>();
+                return template.replace(/'(?:''|[^'])*'|"(?:""|[^"])*"|--[^\n]*|\/\*[\s\S]*?\*\/|[?$](\d+)|:__dari_(\d+)/g,(token,constant,parameter)=>{
                 if(constant===undefined&&parameter===undefined)return token;
+                const position=positions.get(token);
+                if(dialect==='Postgres'&&position!==undefined)return '$'+position;
                 const index=Number(parameter);
                 const value=constant!==undefined?allocated[Number(constant)-1]:constants.has(index)?constants.get(index):parameters[index];
                 if(value===undefined)throw Error('Missing model binding');
                 let type=parameterTypes.get(index);
                 if(type?.kind==='option')type=type.inner;
                 const unwrapped=value?.tag==='None'?null:value?.tag==='Some'?value.value:value;
-                bindings.push(parameter!==undefined&&unwrapped!==null&&type?.codec?type.codec.encode(unwrapped):unwrapped);return '?';
-            });
+                const encoded=parameter!==undefined&&unwrapped!==null&&type?.codec?type.codec.encode(unwrapped):unwrapped;
+                bindings.push(dialect==='Postgres'&&typeof unwrapped==='boolean'&&type?.name==='Bool'?unwrapped:encoded);
+                positions.set(token,bindings.length);
+                return dialect==='Postgres'?'$'+bindings.length:'?';
+                });
+            };
             const sql=checked.union_branches
                 ?template.replace('__dari_union_branches__',()=>checked.union_branches!.map(branch=>bindSql(branch.sql,branch.bindings)).join(' UNION ALL '))
                 :bindSql(template,checked.bindings);
             return {sql,bindings,columns:checked.columns.map(({logical,...column})=>column),max_rows:checked.pivot?.max_rows??checked.max_rows??undefined,pivot:checked.pivot??undefined};
     }
     return {model,bind,stats,contract,codecs,codecModuleSource:contract.codec_module,
-        checkWire(intentJson:string):WireTemplate{return request('ontology/model',{method:'transform',input:{intent:JSON.parse(intentJson)}});},
+        checkWire(intentJson:string):WireTemplate{return request('ontology/model',{method:'transform',input:{intent:JSON.parse(intentJson),dialect}});},
         async close(){if(!closed){closed=true;worker.postMessage({close:true});}await exited;}};
 }

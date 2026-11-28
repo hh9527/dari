@@ -14,8 +14,9 @@
   "typecheck": "tsc -p tsconfig.json --noEmit"
  },
  "dependencies": {
-  "@local/dari-core": "0.1.0",
   "@js-temporal/polyfill": "^0.5.1",
-  "echarts": "^6.1.0"
+  "@local/dari-core": "0.1.0",
+  "echarts": "^6.1.0",
+  "pg": "8.16.3"
  }
 }

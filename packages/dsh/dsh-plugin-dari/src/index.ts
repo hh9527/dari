@@ -67,7 +67,7 @@ if (process.env.DARI_SERVICE === '1') {
   const argv = process.argv.slice(2);
   const custom = argv.includes('--integration');
   await runService(argv, custom ? undefined : async (flags) => {
-    const options = JSON.parse(flags.options ?? '{}') as { model?: string };
-    return createIntegration({ model: options.model, database: flags.database });
+    const options = JSON.parse(flags.options ?? '{}') as { model?: string; postgresEnv?: string };
+    return createIntegration({ model: options.model, database: flags.database, postgresEnv: options.postgresEnv });
   });
 }

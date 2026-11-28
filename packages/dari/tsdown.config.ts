@@ -1,6 +1,6 @@
 import { defineConfig } from 'tsdown';
 
-// 最终制品只有两个 JS：主程序 dari.mjs（CLI + lsp + service 单 bundle）和 worker。
+// 发布主程序以及独立的模型和 PostgreSQL worker。
 // 库（dari-core / dari-model）在构建期被内联，不单独产出文件。
 export default defineConfig([
   {
@@ -20,7 +20,10 @@ export default defineConfig([
   },
   {
     // worker 自带依赖：胶水 + located-input + telora-wasm 打成一个文件。
-    entry: { 'model-worker': '../dari-model/src/model-worker.mjs' },
+    entry: {
+      'model-worker': '../dari-model/src/model-worker.mjs',
+      'postgres-worker': '../dari-model/src/postgres-worker.mjs',
+    },
     format: 'esm',
     platform: 'node',
     target: 'node22',
@@ -29,6 +32,7 @@ export default defineConfig([
     dts: false,
     hash: false,
     unbundle: false,
+    deps: { alwaysBundle: [/^pg$/] },
     outExtensions: () => ({ js: '.mjs' }),
   },
 ]);

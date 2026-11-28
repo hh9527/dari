@@ -31,7 +31,7 @@ export interface DataSeerDeclaration {
 
 /** 部署 profile 的默认设置与宿主集成配置（VA 配置见 src/va.ts）。 */
 export interface PluginConfig extends DataSeerDeclaration {
-  dari?: { service?:string; integration?:string };
+  dari?: { service?:string; integration?:string; postgresEnv?:string };
   vocabularyHelper?: boolean;
   vaPreset?: string;
   vaReasoningEffort?: string;

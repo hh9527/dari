@@ -20,9 +20,13 @@ export function createDariTools(options:{config:PluginConfig['dari'];knowledge:K
   // 默认把宿主插件自身作为 service 入口：同一个 bundle 用 DARI_SERVICE 区分角色。
   const self=fileURLToPath(new URL('./index.mjs',import.meta.url));
   const service=c.service??self;
+  const postgresEnv=c.postgresEnv;
+  if(postgresEnv&&!process.env[postgresEnv])throw Error('Missing PostgreSQL connection environment variable '+postgresEnv);
+  const remote=postgresEnv?[]:['--database',database];
+  const settings=JSON.stringify({model,postgresEnv});
   const args=c.service
-   ?[service,'--integration',c.integration??self,'--options',JSON.stringify({model}),'--database',database]
-   :[service,'--options',JSON.stringify({model}),'--database',database];
+   ?[service,'--integration',c.integration??self,'--options',settings,...remote]
+   :[service,'--options',settings,...remote];
   const env=c.service?process.env:{...process.env,DARI_SERVICE:'1'};
   const child=spawn(process.execPath,args,{stdio:['pipe','pipe','pipe'],detached:true,env});
   let stderr='',sequence=0;const pending=new Map<number,{resolve:(v:any)=>void;reject:(e:Error)=>void;timer:ReturnType<typeof setTimeout>}>();
@@ -38,12 +42,12 @@ export function createDariTools(options:{config:PluginConfig['dari'];knowledge:K
  const source=(root:string,raw:unknown)=>readDariSource(root,raw,'DARI').text;
  function environment(exec:ToolExec){
   exec.signal?.throwIfAborted();const entry=options.knowledge.ensureWorkspace(exec);
-  if(!entry.settings.dataFile)throw Error('DARI requires the workspace dataFile');
+  if(!entry.settings.dataFile&&!options.config?.postgresEnv)throw Error('DARI requires the workspace dataFile');
   const session=exec.agent?.session;if(!session?.id)throw Error('DARI requires a session');
   const key=JSON.stringify([entry.root,session.id]);
   let context=contexts.get(key);
   if(!context){const epochMillis=Date.now(),zone=options.timeContext.zones.get(session);context={epochMillis,now:new Date(epochMillis).toISOString(),timeZone:zone?.kind==='resolved'?zone.timeZone:null};if(contexts.size>=128)contexts.delete(contexts.keys().next().value!);contexts.set(key,context);}
-  return {entry,key,context,host:worker(entry.settings.dataFile,entry.settings.model)};
+  return {entry,key,context,host:worker(entry.settings.dataFile??'',entry.settings.model)};
  }
  const pathUsage='Pass the path of an existing .dari file inside the workspace in src_path. Relative and absolute paths are accepted. Example: { "src_path": "/path/of/source.dari" }.';
  const pathParameters={type:'object' as const,properties:{src_path:{type:'string' as const,description:pathUsage}},required:['src_path'],additionalProperties:false};

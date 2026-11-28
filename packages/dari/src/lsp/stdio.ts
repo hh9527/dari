@@ -41,7 +41,7 @@ export async function runLsp(argv:string[]=process.argv.slice(2)):Promise<void>{
   if(!model){process.stderr.write(`DARI LSP: 工作区 ${workspace} 没有声明 model，模型相关能力不可用\n`);integration={};}
   else{
    const settings={...options,model};
-   integration=flags.integration?await loadIntegration(flags.integration,settings):await createIntegration({model});
+   integration=flags.integration?await loadIntegration(flags.integration,settings):await createIntegration(settings);
   }
   cache.set(workspace,integration);
   return integration;
